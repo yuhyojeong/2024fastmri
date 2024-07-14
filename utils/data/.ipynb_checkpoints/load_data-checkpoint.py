@@ -30,8 +30,10 @@ class SliceData(Dataset):
             self.kspace_examples += [
                 (fname, slice_ind) for slice_ind in range(num_slices)
             ]
-
-
+##########
+        self.image_examples = self.image_examples[:len(self.image_examples)]
+        self.kspace_examples = self.kspace_examples[:len(self.kspace_examples)]
+        
     def _get_metadata(self, fname):
         with h5py.File(fname, "r") as hf:
             if self.input_key in hf.keys():
@@ -83,3 +85,4 @@ def create_data_loaders(data_path, args, shuffle=False, isforward=False):
         shuffle=shuffle,
     )
     return data_loader
+

@@ -30,9 +30,10 @@ class SliceData(Dataset):
             self.kspace_examples += [
                 (fname, slice_ind) for slice_ind in range(num_slices)
             ]
-##########
-        self.image_examples = self.image_examples[:len(self.image_examples)]
-        self.kspace_examples = self.kspace_examples[:len(self.kspace_examples)]
+        random.shuffle(self.image_examples)
+        random.shuffle(self.kspace_examples)
+        self.image_examples = self.image_examples[:len(self.image_examples) // 2]
+        self.kspace_examples = self.kspace_examples[:len(self.kspace_examples) // 2]
         
     def _get_metadata(self, fname):
         with h5py.File(fname, "r") as hf:
@@ -52,7 +53,8 @@ class SliceData(Dataset):
 
         with h5py.File(kspace_fname, "r") as hf:
             input = hf[self.input_key][dataslice]
-            mask =  np.array(hf["mask"])
+            mask = np.array(hf["mask"])
+
         if self.forward:
             target = -1
             attrs = -1
@@ -60,9 +62,32 @@ class SliceData(Dataset):
             with h5py.File(image_fname, "r") as hf:
                 target = hf[self.target_key][dataslice]
                 attrs = dict(hf.attrs)
-            
+
+        # Return padded or resized data
+        input = pad_data(input)  # Adjust according to your dataset
+        mask = pad_mask(mask)
+#         if not self.forward:
+#             target = self.pad_data(target, self.max_target_shape)
+        
         return self.transform(mask, input, target, attrs, kspace_fname.name, dataslice)
 
+    
+def pad_data(arr):
+    """
+    Pad the input tensor to have max_channels in the channel dimension.
+
+    """
+    channels, _, width = arr.shape
+    pad_w = 396 - width
+    pad_c = 20-channels
+    padding = ((0, pad_c), (0, 0), (0, pad_w))  # (2, 2, width, width, height, height, channel, channel, slice, slice)
+    arr = np.pad(arr, padding)
+    return arr
+
+def pad_mask(arr):
+    pad = 396 - arr.shape[0]
+    mask = np.pad(arr, (0, pad))
+    return mask
 
 def create_data_loaders(data_path, args, shuffle=False, isforward=False):
     if isforward == False:

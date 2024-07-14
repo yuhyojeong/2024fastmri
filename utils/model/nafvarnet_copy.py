@@ -1,10 +1,3 @@
-"""
-Copyright (c) Facebook, Inc. and its affiliates.
-
-This source code is licensed under the MIT license found in the
-LICENSE file in the root directory of this source tree.
-"""
-
 import math
 from typing import List, Tuple
 
@@ -15,7 +8,7 @@ import torch.nn.functional as F
 from fastmri.data import transforms
 
 from unet import Unet
-
+from nafnet_copy import Normnafnet
 
 class NormUnet(nn.Module):
     """
@@ -114,9 +107,8 @@ class NormUnet(nn.Module):
         x = self.complex_to_chan_dim(x)
         x, mean, std = self.norm(x)
         x, pad_sizes = self.pad(x)
-        
-        x = self.unet(x) # input, output C, complex, H, W
-        
+        x = self.unet(x)
+
         # get shapes back and unnormalize
         x = self.unpad(x, *pad_sizes)
         x = self.unnorm(x, mean, std)
@@ -191,9 +183,9 @@ class SensitivityModel(nn.Module):
         # convert to image space
         x = fastmri.ifft2c(x)
         x, b = self.chans_to_batch_dim(x)
-        
+
         # estimate sensitivities
-        x = self.norm_unet(x) #input, output C, B, H, W, complex
+        x = self.norm_unet(x)
         x = self.batch_chans_to_chan_dim(x, b)
         x = self.divide_root_sum_of_squares(x)
 
@@ -230,20 +222,31 @@ class VarNet(nn.Module):
         super().__init__()
 
         self.sens_net = SensitivityModel(sens_chans, sens_pools)
+        
         self.cascades = nn.ModuleList(
-            [VarNetBlock(NormUnet(chans, pools)) for _ in range(num_cascades)]
+            ##should change argument of VarNetBlock to NormUnet+NafNet 
+            #arguments for Nafnet
+            #in_chans, out_chans, chans=32, num_pool_layers=4, drop_prob=0.0
+
+            [VarNetBlock(UNaFCascade(Normnafnet(2,2,1,[1,2],[1,1]),NormUnet(chans, pools))) for _ in range(num_cascades)]
         )
 
     def forward(self, masked_kspace: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         sens_maps = self.sens_net(masked_kspace, mask)
+        #print(sens_maps.shape)
         kspace_pred = masked_kspace.clone()
+        
+        #i=0
         for cascade in self.cascades:
+            #print(i, " th cascade \n")
+            #i+=1
             kspace_pred = cascade(kspace_pred, masked_kspace, mask, sens_maps)
             
+
         result = fastmri.rss(fastmri.complex_abs(fastmri.ifft2c(kspace_pred)), dim=1)
         height = result.shape[-2]
         width = result.shape[-1]
-    
+        
         return result[..., (height - 384) // 2 : 384 + (height - 384) // 2, (width - 384) // 2 : 384 + (width - 384) // 2]
 
 
@@ -290,3 +293,23 @@ class VarNetBlock(nn.Module):
         )
 
         return current_kspace - soft_dc - model_term
+
+    
+##NAFnet definition
+class UNaFCascade(nn.Module):
+    def __init__(self, nafnet:nn.Module, normunet: nn.Module):
+        super(UNaFCascade, self).__init__()
+        self.nafnet = nafnet
+        self.normunet = normunet
+    def forward(self, x):
+        
+        x = self.normunet(x)
+        
+        x = self.nafnet(x)
+
+        return x
+
+
+
+
+

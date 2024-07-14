@@ -14,18 +14,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from fastmri.data import transforms
 
-from unet import Unet
+from nafssr_copy import NAFNetSR
 
-
-class NormUnet(nn.Module):
-    """
-    Normalized U-Net model.
-
-    This is the same as a regular U-Net, but with normalization applied to the
-    input before the U-Net. This keeps the values more numerically stable
-    during training.
-    """
-
+class Normnafssr(nn.Module):
     def __init__(
         self,
         chans: int,
@@ -43,13 +34,11 @@ class NormUnet(nn.Module):
             drop_prob: Dropout probability.
         """
         super().__init__()
-
-        self.unet = Unet(
-            in_chans=in_chans,
-            out_chans=out_chans,
-            chans=chans,
-            num_pool_layers=num_pools,
-            drop_prob=drop_prob,
+        #up_scale=4, width=48, num_blks=16, img_channel=3, drop_path_rate=0., drop_out_rate=0., fusion_from=-1, fusion_to=-1, dual=False
+        self.nafssr = NAFNetSR(
+            up_scale = 1,
+            num_blks = num_pools,
+            img_channel = in_chans
         )
 
     def complex_to_chan_dim(self, x: torch.Tensor) -> torch.Tensor:
@@ -114,9 +103,9 @@ class NormUnet(nn.Module):
         x = self.complex_to_chan_dim(x)
         x, mean, std = self.norm(x)
         x, pad_sizes = self.pad(x)
-        
-        x = self.unet(x) # input, output C, complex, H, W
-        
+
+        x = self.nafssr(x)
+
         # get shapes back and unnormalize
         x = self.unpad(x, *pad_sizes)
         x = self.unnorm(x, mean, std)
@@ -152,7 +141,7 @@ class SensitivityModel(nn.Module):
         """
         super().__init__()
 
-        self.norm_unet = NormUnet(
+        self.norm_nafnet = Normnafnet(
             chans,
             num_pools,
             in_chans=in_chans,
@@ -191,9 +180,9 @@ class SensitivityModel(nn.Module):
         # convert to image space
         x = fastmri.ifft2c(x)
         x, b = self.chans_to_batch_dim(x)
-        
+
         # estimate sensitivities
-        x = self.norm_unet(x) #input, output C, B, H, W, complex
+        x = self.norm_nafnet(x)
         x = self.batch_chans_to_chan_dim(x, b)
         x = self.divide_root_sum_of_squares(x)
 
@@ -231,19 +220,18 @@ class VarNet(nn.Module):
 
         self.sens_net = SensitivityModel(sens_chans, sens_pools)
         self.cascades = nn.ModuleList(
-            [VarNetBlock(NormUnet(chans, pools)) for _ in range(num_cascades)]
+            [VarNetBlock(Normnafnet(chans, pools)) for _ in range(num_cascades)]
         )
 
     def forward(self, masked_kspace: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         sens_maps = self.sens_net(masked_kspace, mask)
         kspace_pred = masked_kspace.clone()
+
         for cascade in self.cascades:
             kspace_pred = cascade(kspace_pred, masked_kspace, mask, sens_maps)
-            
         result = fastmri.rss(fastmri.complex_abs(fastmri.ifft2c(kspace_pred)), dim=1)
         height = result.shape[-2]
         width = result.shape[-1]
-    
         return result[..., (height - 384) // 2 : 384 + (height - 384) // 2, (width - 384) // 2 : 384 + (width - 384) // 2]
 
 
