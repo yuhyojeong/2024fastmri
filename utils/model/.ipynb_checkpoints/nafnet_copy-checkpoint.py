@@ -275,7 +275,9 @@ class Normnafnet(nn.Module):
         
         # get shapes for unet and normalize
         x = self.complex_to_chan_dim(x)
+        print(x.shape)
         x, mean, std = self.norm(x)
+        print(x.shape)
         x, pad_sizes = self.pad(x)
         #print("after complex to chan dim inside normnafnet: ",x.shape)
         x = self.nafnet(x)

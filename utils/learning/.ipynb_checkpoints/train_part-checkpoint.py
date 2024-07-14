@@ -9,13 +9,14 @@ from pathlib import Path
 import copy
 
 from collections import defaultdict
-# from utils.data.load_data import create_data_loaders
-from utils.data.load_data2 import create_data_loaders
+from utils.data.load_data import create_data_loaders
+#from utils.data.load_data2 import create_data_loaders
 from utils.common.utils import save_reconstructions, ssim_loss
 from utils.common.loss_function import SSIMLoss
 # from utils.model.varnet import VarNet
 # from utils.model.nafvarnet import VarNet
-from utils.model.nafvarnet_copy import VarNet
+#from utils.model.nafvarnet_copy import VarNet
+from utils.model.varnet_plus_nafnet import VarNet
 
 import os
 

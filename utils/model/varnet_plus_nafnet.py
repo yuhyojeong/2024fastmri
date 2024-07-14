@@ -15,6 +15,7 @@ import torch.nn.functional as F
 from fastmri.data import transforms
 
 from nafnet_copy import Normnafnet
+from nafnet import NAFNet
 from unet import Unet
 
 
@@ -242,8 +243,8 @@ class VarNet(nn.Module):
         for cascade in self.cascades:
             kspace_pred = cascade(kspace_pred, masked_kspace, mask, sens_maps)
         
-        
-        kspace_pred = nafnet(kspace_pred)
+        print(kspace_pred.shape)
+        kspace_pred = self.nafnet(kspace_pred)
         
         result = fastmri.rss(fastmri.complex_abs(fastmri.ifft2c(kspace_pred)), dim=1)
         height = result.shape[-2]

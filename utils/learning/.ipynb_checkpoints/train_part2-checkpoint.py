@@ -4,30 +4,32 @@ import torch
 from collections import defaultdict
 from utils.common.utils import save_reconstructions
 from utils.data.load_data import create_data_loaders
-#from utils.data.load_data2 import create_data_loaders
-# from utils.model.varnet import VarNet
-# from utils.model.nafvarnet import VarNet
-# from utils.model.nafvarnet_copy import VarNet
-from utils.model.varnet_plus_nafnet import VarNet
+
+from utils.model.unet_plus_nafnet import nafunet
 
 def test(args, model, data_loader):
     model.eval()
     reconstructions = defaultdict(dict)
+    inputs = defaultdict(dict)
     
     with torch.no_grad():
-        for (mask, kspace, _, _, fnames, slices) in data_loader:
-            kspace = kspace.cuda(non_blocking=True)
-            mask = mask.cuda(non_blocking=True)
-            output = model(kspace, mask)
+        for (input, _, _, fnames, slices) in data_loader:
+            input = input.cuda(non_blocking=True)
+            output = model(input)
 
             for i in range(output.shape[0]):
                 reconstructions[fnames[i]][int(slices[i])] = output[i].cpu().numpy()
+                inputs[fnames[i]][int(slices[i])] = input[i].cpu().numpy()
 
     for fname in reconstructions:
         reconstructions[fname] = np.stack(
             [out for _, out in sorted(reconstructions[fname].items())]
         )
-    return reconstructions, None
+    for fname in inputs:
+        inputs[fname] = np.stack(
+            [out for _, out in sorted(inputs[fname].items())]
+        )
+    return reconstructions, inputs
 
 
 def forward(args):
@@ -36,9 +38,7 @@ def forward(args):
     torch.cuda.set_device(device)
     print ('Current cuda device ', torch.cuda.current_device())
 
-    model = VarNet(num_cascades=args.cascade, 
-                   chans=args.chans, 
-                   sens_chans=args.sens_chans)
+    model = nafunet(in_chans = args.in_chans, out_chans = args.out_chans)
     model.to(device=device)
     
     checkpoint = torch.load(args.exp_dir / 'best_model.pt', map_location='cpu')
