@@ -8,5 +8,5 @@ python train.py \
   -v '/home/Data/val/' \
   --cascade 12 \
   --chans 9 \
-  --sens_chans 5 \
+  --sens_chans 4 \
   --seed 91
