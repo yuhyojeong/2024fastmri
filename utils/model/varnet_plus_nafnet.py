@@ -194,9 +194,11 @@ class SensitivityModel(nn.Module):
         x = fastmri.ifft2c(x)
         x, b = self.chans_to_batch_dim(x)
         
+        
         # estimate sensitivities
         x = self.norm_unet(x) #input, output C, B, H, W, complex
         x = self.batch_chans_to_chan_dim(x, b)
+        
         x = self.divide_root_sum_of_squares(x)
 
         return x
@@ -242,9 +244,10 @@ class VarNet(nn.Module):
         kspace_pred = masked_kspace.clone()
         for cascade in self.cascades:
             kspace_pred = cascade(kspace_pred, masked_kspace, mask, sens_maps)
+            
         
-        print(kspace_pred.shape)
-        kspace_pred = self.nafnet(kspace_pred)
+    
+        #kspace_pred = self.nafnet(kspace_pred)
         
         result = fastmri.rss(fastmri.complex_abs(fastmri.ifft2c(kspace_pred)), dim=1)
         height = result.shape[-2]

@@ -1,5 +1,8 @@
+import torch
+import torch.nn as nn
+
 from unet import Unet
-from nafnet import NAFnet
+from nafnet import NAFNet
 
 class nafunet(nn.Module):
     def __init__(

@@ -183,10 +183,11 @@ class SensitivityModel(nn.Module):
         # convert to image space
         x = fastmri.ifft2c(x)
         x, b = self.chans_to_batch_dim(x)
-
+        print(x.shape)
         # estimate sensitivities
         x = self.norm_unet(x)
         x = self.batch_chans_to_chan_dim(x, b)
+        print(x.shape)
         x = self.divide_root_sum_of_squares(x)
 
         return x
@@ -233,7 +234,6 @@ class VarNet(nn.Module):
 
     def forward(self, masked_kspace: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         sens_maps = self.sens_net(masked_kspace, mask)
-        #print(sens_maps.shape)
         kspace_pred = masked_kspace.clone()
         
         #i=0

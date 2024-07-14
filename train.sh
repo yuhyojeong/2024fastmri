@@ -7,6 +7,6 @@ python train.py \
   -t '/home/Data/train/' \
   -v '/home/Data/val/' \
   --cascade 12 \
-  --chans 10 \
-  --sens_chans 8 \
+  --chans 9 \
+  --sens_chans 5 \
   --seed 91

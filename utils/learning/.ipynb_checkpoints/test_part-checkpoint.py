@@ -7,7 +7,7 @@ from utils.data.load_data import create_data_loaders
 #from utils.data.load_data2 import create_data_loaders
 # from utils.model.varnet import VarNet
 # from utils.model.nafvarnet import VarNet
-# from utils.model.nafvarnet_copy import VarNet
+#from utils.model.nafvarnet_copy import VarNet
 from utils.model.varnet_plus_nafnet import VarNet
 
 def test(args, model, data_loader):
