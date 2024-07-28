@@ -9,14 +9,12 @@ from pathlib import Path
 import copy
 
 from collections import defaultdict
-from utils.data.load_data import create_data_loaders
 #from utils.data.load_data2 import create_data_loaders
+from utils.data.load_data import create_data_loaders
 from utils.common.utils import save_reconstructions, ssim_loss
 from utils.common.loss_function import SSIMLoss
-# from utils.model.varnet import VarNet
-# from utils.model.nafvarnet import VarNet
 #from utils.model.nafvarnet_copy import VarNet
-from utils.model.varnet_plus_nafnet import VarNet
+from utils.model.nafssrvarnet import VarNet
 
 import os
 
@@ -28,14 +26,10 @@ def train_epoch(args, epoch, model, data_loader, optimizer, loss_type):
 
     for iter, data in enumerate(data_loader):
         mask, kspace, target, maximum, _, _ = data
-        kspace = kspace.cuda(non_blocking=True)
         mask = mask.cuda(non_blocking=True)
+        kspace = kspace.cuda(non_blocking=True)
         target = target.cuda(non_blocking=True)
         maximum = maximum.cuda(non_blocking=True)
-#         mask = torch.stack(mask).cuda(non_blocking=True)
-#         target = torch.stack(target).cuda(non_blocking=True)
-#         maximum = [torch.tensor(maxi) if not isinstance(maxi, torch.Tensor) else maxi for maxi in maximum]
-#         maximum = torch.stack(maximum).cuda(non_blocking=True)
 
         output = model(kspace, mask)
         loss = loss_type(output, target, maximum)
@@ -54,7 +48,6 @@ def train_epoch(args, epoch, model, data_loader, optimizer, loss_type):
             start_iter = time.perf_counter()
     total_loss = total_loss / len_loader
     return total_loss, time.perf_counter() - start_epoch
-
 
 def validate(args, model, data_loader):
     model.eval()

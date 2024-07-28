@@ -50,5 +50,4 @@ class SSIMLoss(nn.Module):
         )
         D = B1 * B2
         S = (A1 * A2) / D
-
         return 1 - S.mean()

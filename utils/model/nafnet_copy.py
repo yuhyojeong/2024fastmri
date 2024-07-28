@@ -4,6 +4,8 @@ import torch.nn.functional as F
 import math
 from torch.nn import init as init
 from typing import List, Tuple
+import torch.utils.checkpoint as checkpoint
+
 
 class LayerNormFunction(torch.autograd.Function):
 
@@ -82,6 +84,7 @@ class NAFBlock(nn.Module):
         self.gamma = nn.Parameter(torch.zeros((1, c, 1, 1)), requires_grad=True)
 
     def forward(self, inp):
+        inp.requires_grad_()
         x = inp
 
         x = self.norm1(x)
@@ -155,6 +158,7 @@ class NAFNet(nn.Module):
         self.padder_size = 2 ** len(self.encoders)
 
     def forward(self, inp):
+        inp.requires_grad_()
         B, C, H, W = inp.shape # C, 2, H, W
         inp = self.check_image_size(inp)
 
@@ -163,11 +167,13 @@ class NAFNet(nn.Module):
         encs = []
 
         for encoder, down in zip(self.encoders, self.downs):
-            x = encoder(x)
+#             x = encoder(x)
+            x = checkpoint.checkpoint(encoder, x)
             encs.append(x)
             x = down(x)
 
-        x = self.middle_blks(x)
+#         x = self.middle_blks(x)
+        x = checkpoint.checkpoint(self.middle_blks, x)
 
         for decoder, up, enc_skip in zip(self.decoders, self.ups, encs[::-1]):
             x = up(x)
@@ -229,12 +235,12 @@ class Normnafnet(nn.Module):
     def norm(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # group norm
         b, c, h, w = x.shape
-        x = x.view(b, 2, c // 2 * h * w)
+        x = x.view(b * c // 2, 2, h * w)
 
-        mean = x.mean(dim=2).view(b, c, 1, 1)
-        std = x.std(dim=2).view(b, c, 1, 1)
+        mean = x.mean(dim=2).view(b * c // 2, 2, 1, 1)
+        std = x.std(dim=2).view(b * c // 2, 2, 1, 1)
 
-        x = x.view(b, c, h, w)
+        x = x.view(b * c // 2, 2, h, w)
 
         return (x - mean) / std, mean, std
 
@@ -270,14 +276,14 @@ class Normnafnet(nn.Module):
         return x[..., h_pad[0] : h_mult - h_pad[1], w_pad[0] : w_mult - w_pad[1]]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x.requires_grad_()
         if not x.shape[-1] == 2:
             raise ValueError("Last dimension must be 2 for complex.")
         
         # get shapes for unet and normalize
         x = self.complex_to_chan_dim(x)
-        print(x.shape)
         x, mean, std = self.norm(x)
-        print(x.shape)
+#         print(x.shape)
         x, pad_sizes = self.pad(x)
         #print("after complex to chan dim inside normnafnet: ",x.shape)
         x = self.nafnet(x)

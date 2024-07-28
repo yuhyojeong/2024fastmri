@@ -6,7 +6,7 @@ python train.py \
   -n 'test_Varnet' \
   -t '/home/Data/train/' \
   -v '/home/Data/val/' \
-  --cascade 12 \
+  --cascade 8 \
   --chans 9 \
   --sens_chans 4 \
   --seed 91

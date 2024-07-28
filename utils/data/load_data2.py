@@ -32,8 +32,8 @@ class SliceData(Dataset):
             ]
         random.shuffle(self.image_examples)
         random.shuffle(self.kspace_examples)
-        self.image_examples = self.image_examples[:len(self.image_examples) // 2]
-        self.kspace_examples = self.kspace_examples[:len(self.kspace_examples) // 2]
+        self.image_examples = self.image_examples[:len(self.image_examples)]
+        self.kspace_examples = self.kspace_examples[:len(self.kspace_examples)]
         
     def _get_metadata(self, fname):
         with h5py.File(fname, "r") as hf:
@@ -62,12 +62,8 @@ class SliceData(Dataset):
             with h5py.File(image_fname, "r") as hf:
                 target = hf[self.target_key][dataslice]
                 attrs = dict(hf.attrs)
-
-        # Return padded or resized data
-        input = pad_data(input)  # Adjust according to your dataset
+        input = pad_data(input)
         mask = pad_mask(mask)
-#         if not self.forward:
-#             target = self.pad_data(target, self.max_target_shape)
         
         return self.transform(mask, input, target, attrs, kspace_fname.name, dataslice)
 
@@ -80,13 +76,13 @@ def pad_data(arr):
     channels, _, width = arr.shape
     pad_w = 396 - width
     pad_c = 20-channels
-    padding = ((0, pad_c), (0, 0), (0, pad_w))  # (2, 2, width, width, height, height, channel, channel, slice, slice)
-    arr = np.pad(arr, padding)
+    padding = ((pad_c//2, pad_c//2), (0, 0), (pad_w//2, pad_w//2))  # (2, 2, width, width, height, height, channel, channel, slice, slice)
+    arr = np.pad(arr, padding, mode = 'constant')
     return arr
 
 def pad_mask(arr):
     pad = 396 - arr.shape[0]
-    mask = np.pad(arr, (0, pad))
+    mask = np.pad(arr, (pad//2, pad//2), mode = 'constant')
     return mask
 
 def create_data_loaders(data_path, args, shuffle=False, isforward=False):

@@ -83,6 +83,8 @@ def create_data_loaders(data_path, args, shuffle=False, isforward=False):
         dataset=data_storage,
         batch_size=args.batch_size,
         shuffle=shuffle,
+#         pin_memory = True,
+#         num_workers = 2
     )
     return data_loader
 

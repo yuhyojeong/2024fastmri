@@ -9,6 +9,8 @@ from fastmri.data import transforms
 
 from unet import Unet
 from nafnet_copy import Normnafnet
+from nafnet_copy import NAFNet
+import torch.utils.checkpoint as checkpoint
 
 class NormUnet(nn.Module):
     """
@@ -60,12 +62,11 @@ class NormUnet(nn.Module):
         # group norm
         b, c, h, w = x.shape
         x = x.view(b, 2, c // 2 * h * w)
-
         mean = x.mean(dim=2).view(b, c, 1, 1)
         std = x.std(dim=2).view(b, c, 1, 1)
-
+        eps = 1e-8
+        std = std + eps
         x = x.view(b, c, h, w)
-
         return (x - mean) / std, mean, std
 
     def unnorm(
@@ -100,9 +101,9 @@ class NormUnet(nn.Module):
         return x[..., h_pad[0] : h_mult - h_pad[1], w_pad[0] : w_mult - w_pad[1]]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x.requires_grad_()
         if not x.shape[-1] == 2:
             raise ValueError("Last dimension must be 2 for complex.")
-
         # get shapes for unet and normalize
         x = self.complex_to_chan_dim(x)
         x, mean, std = self.norm(x)
@@ -167,6 +168,7 @@ class SensitivityModel(nn.Module):
         return x / fastmri.rss_complex(x, dim=1).unsqueeze(-1).unsqueeze(1)
 
     def forward(self, masked_kspace: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        masked_kspace.requires_grad_()
         # get low frequency line locations and mask them out
         squeezed_mask = mask[:, 0, 0, :, 0]
         cent = squeezed_mask.shape[1] // 2
@@ -177,17 +179,13 @@ class SensitivityModel(nn.Module):
             2 * torch.min(left, right), torch.ones_like(left)
         )  # force a symmetric center unless 1
         pad = (mask.shape[-2] - num_low_freqs + 1) // 2
-
         x = transforms.batched_mask_center(masked_kspace, pad, pad + num_low_freqs)
-
         # convert to image space
         x = fastmri.ifft2c(x)
         x, b = self.chans_to_batch_dim(x)
-        print(x.shape)
         # estimate sensitivities
         x = self.norm_unet(x)
         x = self.batch_chans_to_chan_dim(x, b)
-        print(x.shape)
         x = self.divide_root_sum_of_squares(x)
 
         return x
@@ -228,21 +226,24 @@ class VarNet(nn.Module):
             ##should change argument of VarNetBlock to NormUnet+NafNet 
             #arguments for Nafnet
             #in_chans, out_chans, chans=32, num_pool_layers=4, drop_prob=0.0
-
+            
+            # 1, [1,1,1,2], [1,1,1,1]
+            # try increasing middle bulk 
             [VarNetBlock(UNaFCascade(Normnafnet(2,2,1,[1,2],[1,1]),NormUnet(chans, pools))) for _ in range(num_cascades)]
         )
 
     def forward(self, masked_kspace: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        masked_kspace.requires_grad_()
+        ##########
         sens_maps = self.sens_net(masked_kspace, mask)
         kspace_pred = masked_kspace.clone()
-        
         #i=0
         for cascade in self.cascades:
             #print(i, " th cascade \n")
             #i+=1
-            kspace_pred = cascade(kspace_pred, masked_kspace, mask, sens_maps)
+#             kspace_pred = cascade(kspace_pred, masked_kspace, mask, sens_maps)
+            kspace_pred = checkpoint.checkpoint(cascade, kspace_pred, masked_kspace, mask, sens_maps)
             
-
         result = fastmri.rss(fastmri.complex_abs(fastmri.ifft2c(kspace_pred)), dim=1)
         height = result.shape[-2]
         width = result.shape[-1]
@@ -286,12 +287,14 @@ class VarNetBlock(nn.Module):
         mask: torch.Tensor,
         sens_maps: torch.Tensor,
     ) -> torch.Tensor:
+        current_kspace.requires_grad_()
+        ref_kspace.requires_grad_()
+        sens_maps.requires_grad_()
         zero = torch.zeros(1, 1, 1, 1, 1).to(current_kspace)
         soft_dc = torch.where(mask, current_kspace - ref_kspace, zero) * self.dc_weight
         model_term = self.sens_expand(
             self.model(self.sens_reduce(current_kspace, sens_maps)), sens_maps
         )
-
         return current_kspace - soft_dc - model_term
 
     
@@ -302,7 +305,7 @@ class UNaFCascade(nn.Module):
         self.nafnet = nafnet
         self.normunet = normunet
     def forward(self, x):
-        
+        x.requires_grad_()
         x = self.normunet(x)
         
         x = self.nafnet(x)
