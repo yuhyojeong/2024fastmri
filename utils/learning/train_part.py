@@ -9,14 +9,15 @@ from pathlib import Path
 import copy
 
 from collections import defaultdict
-#from utils.data.load_data2 import create_data_loaders
+#from utils.data.load_grappa import create_data_loaders
 from utils.data.load_data import create_data_loaders
 from utils.common.utils import save_reconstructions, ssim_loss
 from utils.common.loss_function import SSIMLoss
 #from utils.model.nafvarnet_copy import VarNet
-from utils.model.nafssrvarnet import VarNet
-
+# from utils.model.varnet_nafssr import VarNet
+from utils.model.varnet import VarNet
 import os
+import torch.cuda.amp as amp
 
 def train_epoch(args, epoch, model, data_loader, optimizer, loss_type):
     model.train()
@@ -25,13 +26,14 @@ def train_epoch(args, epoch, model, data_loader, optimizer, loss_type):
     total_loss = 0.
 
     for iter, data in enumerate(data_loader):
-        mask, kspace, target, maximum, _, _ = data
+        mask, kspace, grappa, target, maximum, _, _ = data
         mask = mask.cuda(non_blocking=True)
         kspace = kspace.cuda(non_blocking=True)
         target = target.cuda(non_blocking=True)
         maximum = maximum.cuda(non_blocking=True)
+        grappa = grappa.cuda(non_blocking=True)
 
-        output = model(kspace, mask)
+        output = model(kspace, mask, grappa)
         loss = loss_type(output, target, maximum)
         optimizer.zero_grad()
         loss.backward()
@@ -57,10 +59,11 @@ def validate(args, model, data_loader):
 
     with torch.no_grad():
         for iter, data in enumerate(data_loader):
-            mask, kspace, target, _, fnames, slices = data
+            mask, kspace, grappa, target, _, fnames, slices = data
             kspace = kspace.cuda(non_blocking=True)
             mask = mask.cuda(non_blocking=True)
-            output = model(kspace, mask)
+            grappa = grappa.cuda(non_blocking=True)
+            output = model(kspace, mask, grappa)
 
             for i in range(output.shape[0]):
                 reconstructions[fnames[i]][int(slices[i])] = output[i].cpu().numpy()
@@ -141,8 +144,9 @@ def train(args):
     """
 
     loss_type = SSIMLoss().to(device=device)
-    optimizer = torch.optim.Adam(model.parameters(), args.lr)
-
+    #optimizer = torch.optim.Adam(model.parameters(), args.lr)
+    optimizer = torch.optim.AdamW(model.parameters(), args.lr)
+    
     best_val_loss = 1.
     start_epoch = 0
 

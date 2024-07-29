@@ -23,7 +23,7 @@ class DataTransform:
         else:
             target = -1
             maximum = -1
-        
+            
         grappa = to_tensor(grappa)
         kspace = to_tensor(input * mask)
         kspace = torch.stack((kspace.real, kspace.imag), dim=-1)

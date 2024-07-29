@@ -1,6 +1,6 @@
 import h5py
 import random
-from utils.data.transforms import DataTransform
+from utils.data.transforms_grappa import DataTransform
 from torch.utils.data import Dataset, DataLoader
 from pathlib import Path
 import numpy as np
@@ -13,26 +13,36 @@ class SliceData(Dataset):
         self.forward = forward
         self.image_examples = []
         self.kspace_examples = []
-
+        self.grappa_examples = []
+        
+        image_files = list(Path(root / "image").iterdir())
+        kspace_files = list(Path(root / "kspace").iterdir())
+        
         if not forward:
-            image_files = list(Path(root / "image").iterdir())
             for fname in sorted(image_files):
                 num_slices = self._get_metadata(fname)
 
                 self.image_examples += [
                     (fname, slice_ind) for slice_ind in range(num_slices)
                 ]
-
-        kspace_files = list(Path(root / "kspace").iterdir())
+        
         for fname in sorted(kspace_files):
             num_slices = self._get_metadata(fname)
 
             self.kspace_examples += [
                 (fname, slice_ind) for slice_ind in range(num_slices)
             ]
+            
+        for fname in sorted(image_files):
+            with h5py.File(fname, "r") as hf:
+                num_slices = hf['image_grappa'].shape[0]
+                self.grappa_examples += [
+                    (fname, slice_ind) for slice_ind in range(num_slices)
+                ]
 ##########
         self.image_examples = self.image_examples[:len(self.image_examples)]
         self.kspace_examples = self.kspace_examples[:len(self.kspace_examples)]
+        self.grappa_examples = self.grappa_examples[:len(self.grappa_examples)]
         
     def _get_metadata(self, fname):
         with h5py.File(fname, "r") as hf:
@@ -49,10 +59,13 @@ class SliceData(Dataset):
         if not self.forward:
             image_fname, _ = self.image_examples[i]
         kspace_fname, dataslice = self.kspace_examples[i]
+        grappa_fname, dataslice = self.grappa_examples[i]
 
         with h5py.File(kspace_fname, "r") as hf:
             input = hf[self.input_key][dataslice]
             mask =  np.array(hf["mask"])
+        with h5py.File(grappa_fname, "r") as hf:
+            grappa = hf['image_grappa'][dataslice]
         if self.forward:
             target = -1
             attrs = -1
@@ -61,7 +74,7 @@ class SliceData(Dataset):
                 target = hf[self.target_key][dataslice]
                 attrs = dict(hf.attrs)
             
-        return self.transform(mask, input, target, attrs, kspace_fname.name, dataslice)
+        return self.transform(mask, input, grappa, target, attrs, kspace_fname.name, dataslice)
 
 
 def create_data_loaders(data_path, args, shuffle=False, isforward=False):

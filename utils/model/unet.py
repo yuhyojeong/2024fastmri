@@ -82,8 +82,8 @@ class Unet(nn.Module):
             stack.append(output)
             output = F.avg_pool2d(output, kernel_size=2, stride=2, padding=0)
 
-#         output = self.conv(output)
-        output = checkpoint(self.conv, output)
+        output = self.conv(output)
+#         output = checkpoint(self.conv, output)
 
         # apply up-sampling layers
         for transpose_conv, conv in zip(self.up_transpose_conv, self.up_conv):
@@ -100,8 +100,8 @@ class Unet(nn.Module):
                 output = F.pad(output, padding, "reflect")
 
             output = torch.cat([output, downsample_layer], dim=1)
-#             output = conv(output)
-            output = checkpoint(conv, output)
+            output = conv(output)
+#             output = checkpoint(conv, output)
         
         return output
 

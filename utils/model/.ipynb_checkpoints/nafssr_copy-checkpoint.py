@@ -246,15 +246,15 @@ class Normnafssr(nn.Module):
     def __init__(
         #up_scale=4, width=48, num_blks=16, img_channel=3, drop_path_rate=0., drop_out_rate=0., fusion_from=-1, fusion_to=-1, dual=False
         self,
-        up_scale=4,
-        width=24, 
-        num_blks=8, 
-        img_channel=2, 
-        drop_path_rate=0., 
-        drop_out_rate=0., 
-        fusion_from=-1, 
-        fusion_to=-1, 
-        dual=False
+        up_scale,
+        width, 
+        num_blks, 
+        img_channel, 
+        drop_path_rate, 
+        drop_out_rate, 
+        fusion_from, 
+        fusion_to, 
+        dual
         
     ):
         """
@@ -267,9 +267,7 @@ class Normnafssr(nn.Module):
         """
         super().__init__()
 
-        self.nafssr = NAFNetSR(
-            img_channel=2
-        )
+        self.nafssr = NAFNetSR(up_scale, width, num_blks, img_channel, drop_path_rate, drop_out_rate, fusion_from, fusion_to, dual)
 
     def complex_to_chan_dim(self, x: torch.Tensor) -> torch.Tensor:
         b, c, h, w, two = x.shape
@@ -327,11 +325,11 @@ class Normnafssr(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x.requires_grad_()
-        if not x.shape[-1] == 2:
-            raise ValueError("Last dimension must be 2 for complex.")
+        #if not x.shape[-1] == 2:
+        #    raise ValueError("Last dimension must be 2 for complex.")
         
         # get shapes for unet and normalize
-        x = self.complex_to_chan_dim(x)
+        #x = self.complex_to_chan_dim(x)
         x, mean, std = self.norm(x)
         #print(x.shape)
         x, pad_sizes = self.pad(x)
@@ -341,7 +339,7 @@ class Normnafssr(nn.Module):
         # get shapes back and unnormalize
         x = self.unpad(x, *pad_sizes)
         x = self.unnorm(x, mean, std)
-        x = self.chan_complex_to_last_dim(x)
+        #x = self.chan_complex_to_last_dim(x)
         #print("after chan complex to last dim inside normnafnet: ",x.shape)
         return x
 

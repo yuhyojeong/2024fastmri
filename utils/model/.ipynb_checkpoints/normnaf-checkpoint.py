@@ -197,9 +197,9 @@ class NAFNet(nn.Module):
 class Normnafnet(nn.Module):
     def __init__(
         self,
-        in_chans: int = 2,
-        out_chans: int = 2,
-        middle_blk_num=1,
+        in_chans,
+        out_chans,
+        middle_blk_num,
         enc_blk_nums=[],
         dec_blk_nums=[]
     ):
@@ -221,26 +221,15 @@ class Normnafnet(nn.Module):
             dec_blk_nums = dec_blk_nums
         )
 
-    def complex_to_chan_dim(self, x: torch.Tensor) -> torch.Tensor:
-        b, c, h, w, two = x.shape
-        assert two == 2
-        return x.permute(0, 4, 1, 2, 3).reshape(b, 2 * c, h, w)
-
-    def chan_complex_to_last_dim(self, x: torch.Tensor) -> torch.Tensor:
-        b, c2, h, w = x.shape
-        assert c2 % 2 == 0
-        c = c2 // 2
-        return x.view(b, 2, c, h, w).permute(0, 2, 3, 4, 1).contiguous()
-
     def norm(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # group norm
         b, c, h, w = x.shape
-        x = x.view(b * c // 2, 2, h * w)
+        x = x.view(b * c // 3, 3, h * w)
 
-        mean = x.mean(dim=2).view(b * c // 2, 2, 1, 1)
-        std = x.std(dim=2).view(b * c // 2, 2, 1, 1)
+        mean = x.mean(dim=2).view(b * c // 3, 3, 1, 1)
+        std = x.std(dim=2).view(b * c // 3, 3, 1, 1)
 
-        x = x.view(b * c // 2, 2, h, w)
+        x = x.view(b * c // 3, 3, h, w)
 
         return (x - mean) / std, mean, std
 
@@ -276,21 +265,12 @@ class Normnafnet(nn.Module):
         return x[..., h_pad[0] : h_mult - h_pad[1], w_pad[0] : w_mult - w_pad[1]]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x.requires_grad_()
-        if not x.shape[-1] == 2:
-            raise ValueError("Last dimension must be 2 for complex.")
-        
         # get shapes for unet and normalize
-        x = self.complex_to_chan_dim(x)
         x, mean, std = self.norm(x)
-#         print(x.shape)
         x, pad_sizes = self.pad(x)
-        #print("after complex to chan dim inside normnafnet: ",x.shape)
         x = self.nafnet(x)
 
         # get shapes back and unnormalize
         x = self.unpad(x, *pad_sizes)
         x = self.unnorm(x, mean, std)
-        x = self.chan_complex_to_last_dim(x)
-        #print("after chan complex to last dim inside normnafnet: ",x.shape)
         return x

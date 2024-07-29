@@ -1,10 +1,36 @@
+# ------------------------------------------------------------------------
+# Copyright (c) 2022 megvii-model. All Rights Reserved.
+# ------------------------------------------------------------------------
+
+'''
+NAFSSR: Stereo Image Super-Resolution Using NAFNet
+
+@InProceedings{Chu2022NAFSSR,
+  author    = {Xiaojie Chu and Liangyu Chen and Wenqing Yu},
+  title     = {NAFSSR: Stereo Image Super-Resolution Using NAFNet},
+  booktitle = {CVPRW},
+  year      = {2022},
+}
+'''
+import math
+from typing import List, Tuple
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import math
-from torch.nn import init as init
-from typing import List, Tuple
-import torch.utils.checkpoint as checkpoint
+
+
+
+# handle multiple input
+class MySequential(nn.Sequential):
+    def forward(self, *inputs):
+        for module in self._modules.values():
+            if type(inputs) == tuple:
+                inputs = module(*inputs)
+            else:
+                inputs = module(inputs)
+        return inputs
 
 
 class LayerNormFunction(torch.autograd.Function):
@@ -84,7 +110,6 @@ class NAFBlock(nn.Module):
         self.gamma = nn.Parameter(torch.zeros((1, c, 1, 1)), requires_grad=True)
 
     def forward(self, inp):
-        inp.requires_grad_()
         x = inp
 
         x = self.norm1(x)
@@ -107,101 +132,130 @@ class NAFBlock(nn.Module):
 
         return y + x * self.gamma
 
-
-class NAFNet(nn.Module):
-
-    def __init__(self, in_chans, out_chans, middle_blk_num=1, enc_blk_nums=[], dec_blk_nums=[]):
+class SCAM(nn.Module):
+    '''
+    Stereo Cross Attention Module (SCAM)
+    '''
+    def __init__(self, c):
         super().__init__()
+        self.scale = c ** -0.5
 
-        self.intro = nn.Conv2d(in_channels=in_chans, out_channels=out_chans, kernel_size=3, padding=1, stride=1, groups=1,
+        self.norm_l = LayerNorm2d(c)
+        self.norm_r = LayerNorm2d(c)
+        self.l_proj1 = nn.Conv2d(c, c, kernel_size=1, stride=1, padding=0)
+        self.r_proj1 = nn.Conv2d(c, c, kernel_size=1, stride=1, padding=0)
+        
+        self.beta = nn.Parameter(torch.zeros((1, c, 1, 1)), requires_grad=True)
+        self.gamma = nn.Parameter(torch.zeros((1, c, 1, 1)), requires_grad=True)
+
+        self.l_proj2 = nn.Conv2d(c, c, kernel_size=1, stride=1, padding=0)
+        self.r_proj2 = nn.Conv2d(c, c, kernel_size=1, stride=1, padding=0)
+
+    def forward(self, x_l, x_r):
+        Q_l = self.l_proj1(self.norm_l(x_l)).permute(0, 2, 3, 1)  # B, H, W, c
+        Q_r_T = self.r_proj1(self.norm_r(x_r)).permute(0, 2, 1, 3) # B, H, c, W (transposed)
+
+        V_l = self.l_proj2(x_l).permute(0, 2, 3, 1)  # B, H, W, c
+        V_r = self.r_proj2(x_r).permute(0, 2, 3, 1)  # B, H, W, c
+
+        # (B, H, W, c) x (B, H, c, W) -> (B, H, W, W)
+        attention = torch.matmul(Q_l, Q_r_T) * self.scale
+
+        F_r2l = torch.matmul(torch.softmax(attention, dim=-1), V_r)  #B, H, W, c
+        F_l2r = torch.matmul(torch.softmax(attention.permute(0, 1, 3, 2), dim=-1), V_l) #B, H, W, c
+
+        # scale
+        F_r2l = F_r2l.permute(0, 3, 1, 2) * self.beta
+        F_l2r = F_l2r.permute(0, 3, 1, 2) * self.gamma
+        return x_l + F_r2l, x_r + F_l2r
+
+class DropPath(nn.Module):
+    def __init__(self, drop_rate, module):
+        super().__init__()
+        self.drop_rate = drop_rate
+        self.module = module
+
+    def forward(self, *feats):
+        if self.training and np.random.rand() < self.drop_rate:
+            return feats
+
+        new_feats = self.module(*feats)
+        factor = 1. / (1 - self.drop_rate) if self.training else 1.
+
+        if self.training and factor != 1.:
+            new_feats = tuple([x+factor*(new_x-x) for x, new_x in zip(feats, new_feats)])
+        return new_feats
+
+class NAFBlockSR(nn.Module):
+    '''
+    NAFBlock for Super-Resolution
+    '''
+    def __init__(self, c, fusion=False, drop_out_rate=0.):
+        super().__init__()
+        self.blk = NAFBlock(c, drop_out_rate=drop_out_rate)
+        self.fusion = SCAM(c) if fusion else None
+
+    def forward(self, *feats):
+        feats = tuple([self.blk(x) for x in feats])
+        if self.fusion:
+            feats = self.fusion(*feats)
+        return feats
+
+class NAFNetSR(nn.Module):
+    '''
+    NAFNet for Super-Resolution
+    '''
+    def __init__(self, up_scale=4, width=24, num_blks=8, img_channel=2, drop_path_rate=0., drop_out_rate=0., fusion_from=-1, fusion_to=-1, dual=False):
+        super().__init__()
+        self.dual = dual    # dual input for stereo SR (left view, right view)
+        self.intro = nn.Conv2d(in_channels=img_channel, out_channels=width, kernel_size=3, padding=1, stride=1, groups=1,
                               bias=True)
-        self.ending = nn.Conv2d(in_channels=out_chans, out_channels=in_chans, kernel_size=3, padding=1, stride=1, groups=1,
-                              bias=True)
+        self.body = MySequential(
+            *[DropPath(
+                drop_path_rate, 
+                NAFBlockSR(
+                    width, 
+                    fusion=(fusion_from <= i and i <= fusion_to), 
+                    drop_out_rate=drop_out_rate
+                )) for i in range(num_blks)]
+        )
 
-        self.encoders = nn.ModuleList()
-        self.decoders = nn.ModuleList()
-        self.middle_blks = nn.ModuleList()
-        self.ups = nn.ModuleList()
-        self.downs = nn.ModuleList()
-
-        chan = out_chans
-        for num in enc_blk_nums:
-            self.encoders.append(
-                nn.Sequential(
-                    *[NAFBlock(chan) for _ in range(num)]
-                )
-            )
-            self.downs.append(
-                nn.Conv2d(chan, 2*chan, 2, 2)
-            )
-            chan = chan * 2
-
-        self.middle_blks = \
-            nn.Sequential(
-                *[NAFBlock(chan) for _ in range(middle_blk_num)]
-            )
-
-        for num in dec_blk_nums:
-            self.ups.append(
-                nn.Sequential(
-                    nn.Conv2d(chan, chan * 2, 1, bias=False),
-                    nn.PixelShuffle(2)
-                )
-            )
-            chan = chan // 2
-            self.decoders.append(
-                nn.Sequential(
-                    *[NAFBlock(chan) for _ in range(num)]
-                )
-            )
-
-        self.padder_size = 2 ** len(self.encoders)
+        self.up = nn.Sequential(
+            nn.Conv2d(in_channels=width, out_channels=img_channel * up_scale**2, kernel_size=3, padding=1, stride=1, groups=1, bias=True),
+            nn.PixelShuffle(up_scale)
+        )
+        self.up_scale = up_scale
 
     def forward(self, inp):
-        inp.requires_grad_()
-        B, C, H, W = inp.shape # C, 2, H, W
-        inp = self.check_image_size(inp)
+        inp_hr = F.interpolate(inp, scale_factor=self.up_scale, mode='bilinear')
+        if self.dual:
+            inp = inp.chunk(2, dim=1)
+        else:
+            inp = (inp, )
+        feats = [self.intro(x) for x in inp]
+        feats = self.body(*feats)
+        out = torch.cat([self.up(x) for x in feats], dim=1)
+        out = out + inp_hr
+        return out
 
-        x = self.intro(inp)
 
-        encs = []
-
-        for encoder, down in zip(self.encoders, self.downs):
-            x = encoder(x)
-#             x = checkpoint.checkpoint(encoder, x)
-            encs.append(x)
-            x = down(x)
-
-        x = self.middle_blks(x)
-#         x = checkpoint.checkpoint(self.middle_blks, x)
-
-        for decoder, up, enc_skip in zip(self.decoders, self.ups, encs[::-1]):
-            x = up(x)
-            x = x + enc_skip
-            x = decoder(x)
-
-        x = self.ending(x)
-        x = x + inp
-
-        return x[:, :, :H, :W]
-
-    def check_image_size(self, x):
-        _, _, h, w = x.size()
-        mod_pad_h = (self.padder_size - h % self.padder_size) % self.padder_size
-        mod_pad_w = (self.padder_size - w % self.padder_size) % self.padder_size
-        x = F.pad(x, (0, mod_pad_w, 0, mod_pad_h))
-        return x
 
     
 
-class Normnafnet(nn.Module):
+class Normnafssr(nn.Module):
     def __init__(
+        #up_scale=4, width=48, num_blks=16, img_channel=3, drop_path_rate=0., drop_out_rate=0., fusion_from=-1, fusion_to=-1, dual=False
         self,
-        in_chans: int = 2,
-        out_chans: int = 2,
-        middle_blk_num=1,
-        enc_blk_nums=[],
-        dec_blk_nums=[]
+        up_scale,
+        width, 
+        num_blks, 
+        img_channel, 
+        drop_path_rate, 
+        drop_out_rate, 
+        fusion_from, 
+        fusion_to, 
+        dual
+        
     ):
         """
         Args:
@@ -213,24 +267,7 @@ class Normnafnet(nn.Module):
         """
         super().__init__()
 
-        self.nafnet = NAFNet(
-            in_chans=in_chans,
-            out_chans=out_chans,
-            middle_blk_num = middle_blk_num,
-            enc_blk_nums = enc_blk_nums,
-            dec_blk_nums = dec_blk_nums
-        )
-
-    def complex_to_chan_dim(self, x: torch.Tensor) -> torch.Tensor:
-        b, c, h, w, two = x.shape
-        assert two == 2
-        return x.permute(0, 4, 1, 2, 3).reshape(b, 2 * c, h, w)
-
-    def chan_complex_to_last_dim(self, x: torch.Tensor) -> torch.Tensor:
-        b, c2, h, w = x.shape
-        assert c2 % 2 == 0
-        c = c2 // 2
-        return x.view(b, 2, c, h, w).permute(0, 2, 3, 4, 1).contiguous()
+        self.nafssr = NAFNetSR(up_scale, width, num_blks, img_channel, drop_path_rate, drop_out_rate, fusion_from, fusion_to, dual)
 
     def norm(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # group norm
@@ -276,21 +313,17 @@ class Normnafnet(nn.Module):
         return x[..., h_pad[0] : h_mult - h_pad[1], w_pad[0] : w_mult - w_pad[1]]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x.requires_grad_()
-        if not x.shape[-1] == 2:
-            raise ValueError("Last dimension must be 2 for complex.")
-        
         # get shapes for unet and normalize
-        x = self.complex_to_chan_dim(x)
         x, mean, std = self.norm(x)
-#         print(x.shape)
+        #print(x.shape)
         x, pad_sizes = self.pad(x)
         #print("after complex to chan dim inside normnafnet: ",x.shape)
-        x = self.nafnet(x)
+        x = self.nafssr(x)
 
         # get shapes back and unnormalize
         x = self.unpad(x, *pad_sizes)
         x = self.unnorm(x, mean, std)
-        x = self.chan_complex_to_last_dim(x)
         #print("after chan complex to last dim inside normnafnet: ",x.shape)
         return x
+
+

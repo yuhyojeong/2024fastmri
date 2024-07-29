@@ -1,6 +1,6 @@
 import h5py
 import random
-from utils.data.transforms import DataTransform
+from utils.data.transforms_grappa import DataTransform
 from torch.utils.data import Dataset, DataLoader
 from pathlib import Path
 import numpy as np
@@ -56,12 +56,14 @@ class SliceData(Dataset):
         if self.forward:
             target = -1
             attrs = -1
+            grappa = -1
         else:
             with h5py.File(image_fname, "r") as hf:
                 target = hf[self.target_key][dataslice]
+                grappa = hf['image_grappa'][dataslice]
                 attrs = dict(hf.attrs)
             
-        return self.transform(mask, input, target, attrs, kspace_fname.name, dataslice)
+        return self.transform(mask, input, grappa, target, attrs, kspace_fname.name, dataslice)
 
 
 def create_data_loaders(data_path, args, shuffle=False, isforward=False):
@@ -83,6 +85,8 @@ def create_data_loaders(data_path, args, shuffle=False, isforward=False):
         dataset=data_storage,
         batch_size=args.batch_size,
         shuffle=shuffle,
+#         pin_memory = True,
+#         num_workers = 2
     )
     return data_loader
 

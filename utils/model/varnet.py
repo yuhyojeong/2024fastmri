@@ -13,7 +13,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from fastmri.data import transforms
-
+import torch.utils.checkpoint as checkpoint
+from normnaf import Normnafnet
+from normnafssr import Normnafssr
 from unet import Unet
 
 
@@ -67,10 +69,10 @@ class NormUnet(nn.Module):
         # group norm
         b, c, h, w = x.shape
         x = x.view(b, 2, c // 2 * h * w)
-
         mean = x.mean(dim=2).view(b, c, 1, 1)
         std = x.std(dim=2).view(b, c, 1, 1)
-
+        ### for batch > 1
+#         std = std + 1e-8
         x = x.view(b, c, h, w)
 
         return (x - mean) / std, mean, std
@@ -233,18 +235,27 @@ class VarNet(nn.Module):
         self.cascades = nn.ModuleList(
             [VarNetBlock(NormUnet(chans, pools)) for _ in range(num_cascades)]
         )
+        self.normnaf = Normnafnet(3, 3, 1, [1, 1, 1, 28], [1, 1, 1, 1])
+        self.normnafssr = Normnafssr(up_scale=4, width=16, num_blks=16, img_channel=2, drop_path_rate=0.1, drop_out_rate=0.1, fusion_from=-1, fusion_to=-1, dual=False)
 
-    def forward(self, masked_kspace: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    def forward(self, masked_kspace: torch.Tensor, mask: torch.Tensor, grappa: torch.Tensor) -> torch.Tensor:
         sens_maps = self.sens_net(masked_kspace, mask)
         kspace_pred = masked_kspace.clone()
         for cascade in self.cascades:
-            kspace_pred = cascade(kspace_pred, masked_kspace, mask, sens_maps)
+#             kspace_pred = cascade(kspace_pred, masked_kspace, mask, sens_maps)
+            kspace_pred = checkpoint.checkpoint(cascade, kspace_pred, masked_kspace, mask, sens_maps)
             
         result = fastmri.rss(fastmri.complex_abs(fastmri.ifft2c(kspace_pred)), dim=1)
         height = result.shape[-2]
         width = result.shape[-1]
-    
-        return result[..., (height - 384) // 2 : 384 + (height - 384) // 2, (width - 384) // 2 : 384 + (width - 384) // 2]
+        result = result[..., (height - 384) // 2 : 384 + (height - 384) // 2, (width - 384) // 2 : 384 + (width - 384) // 2]
+        result = result.unsqueeze(1)
+        grappa = grappa.unsqueeze(1)
+        result = torch.cat((result, grappa, result), dim = 1)
+        result = self.normnaf(result)
+#         result = self.normnafssr(result)
+        result = result.mean(dim=1)
+        return result
 
 
 class VarNetBlock(nn.Module):
@@ -283,6 +294,9 @@ class VarNetBlock(nn.Module):
         mask: torch.Tensor,
         sens_maps: torch.Tensor,
     ) -> torch.Tensor:
+        current_kspace.requires_grad_()
+        ref_kspace.requires_grad_()
+        sens_maps.requires_grad_()
         zero = torch.zeros(1, 1, 1, 1, 1).to(current_kspace)
         soft_dc = torch.where(mask, current_kspace - ref_kspace, zero) * self.dc_weight
         model_term = self.sens_expand(

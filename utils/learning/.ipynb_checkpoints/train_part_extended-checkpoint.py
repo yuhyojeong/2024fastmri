@@ -1,21 +1,23 @@
 import shutil
 import numpy as np
 import torch
+import torch.nn as nn
 import time
 import requests
 from tqdm import tqdm
 from pathlib import Path
 import copy
 
-from torch.cuda.amp import autocast, GradScaler
-from torch.optim.lr_scheduler import ReduceLROnPlateau
 from collections import defaultdict
+#from utils.data.load_data2 import create_data_loaders
 from utils.data.load_data import create_data_loaders
 from utils.common.utils import save_reconstructions, ssim_loss
 from utils.common.loss_function import SSIMLoss
-from utils.model.nafvarnet_copy import VarNet
-
+#from utils.model.nafvarnet_copy import VarNet
+# from utils.model.nafssrvarnet import VarNet
+from utils.model.varnet import VarNet
 import os
+import torch.cuda.amp as amp
 
 def train_epoch(args, epoch, model, data_loader, optimizer, loss_type, scaler):
     model.train()
@@ -31,13 +33,15 @@ def train_epoch(args, epoch, model, data_loader, optimizer, loss_type, scaler):
         maximum = maximum.cuda(non_blocking=True)
 
         optimizer.zero_grad()
-        with torch.cuda.amp.autocast():
+        
+        with amp.autocast():
             output = model(kspace, mask)
             loss = loss_type(output, target, maximum)
-        
+
         scaler.scale(loss).backward()
         scaler.step(optimizer)
         scaler.update()
+        
         total_loss += loss.item()
 
         if iter % args.report_interval == 0:
@@ -66,9 +70,8 @@ def validate(args, model, data_loader):
 
             for i in range(output.shape[0]):
                 reconstructions[fnames[i]][int(slices[i])] = output[i].cpu().numpy()
-                targets[fnames[i]][int(slices[i])] = target[i].cpu().numpy()
+                targets[fnames[i]][int(slices[i])] = target[i].numpy()
 
-    # Convert reconstructions and targets to numpy arrays
     for fname in reconstructions:
         reconstructions[fname] = np.stack(
             [out for _, out in sorted(reconstructions[fname].items())]
@@ -123,8 +126,8 @@ def train(args):
                    sens_chans=args.sens_chans)
     model.to(device=device)
 
-    # Uncomment this section if you want to use pretrained weights
     """
+    # using pretrained parameter
     VARNET_FOLDER = "https://dl.fbaipublicfiles.com/fastMRI/trained_models/varnet/"
     MODEL_FNAMES = "brain_leaderboard_state_dict.pt"
     if not Path(MODEL_FNAMES).exists():
@@ -134,21 +137,21 @@ def train(args):
     pretrained = torch.load(MODEL_FNAMES)
     pretrained_copy = copy.deepcopy(pretrained)
     for layer in pretrained_copy.keys():
-        if layer.split('.',2)[1].isdigit() and (args.cascade <= int(layer.split('.',2')[1]) <=11):
+        if layer.split('.',2)[1].isdigit() and (args.cascade <= int(layer.split('.',2)[1]) <=11):
             del pretrained[layer]
     model.load_state_dict(pretrained)
     """
 
     loss_type = SSIMLoss().to(device=device)
     optimizer = torch.optim.Adam(model.parameters(), args.lr)
-    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=1, min_lr=1e-6)
-    scaler = GradScaler()
+    scaler = amp.GradScaler()
 
-    best_val_loss = float('inf')
+    best_val_loss = 1.
     start_epoch = 0
 
-    train_loader = create_data_loaders(data_path=args.data_path_train, args=args, shuffle=True)
-    val_loader = create_data_loaders(data_path=args.data_path_val, args=args)
+    
+    train_loader = create_data_loaders(data_path = args.data_path_train, args = args, shuffle=True)
+    val_loader = create_data_loaders(data_path = args.data_path_val, args = args)
     
     val_loss_log = np.empty((0, 2))
     for epoch in range(start_epoch, args.num_epochs):
@@ -160,11 +163,13 @@ def train(args):
         val_loss_log = np.append(val_loss_log, np.array([[epoch, val_loss]]), axis=0)
         file_path = os.path.join(args.val_loss_dir, "val_loss_log.npy")
         np.save(file_path, val_loss_log)
-        print(f"Loss file saved! {file_path}")
+        print(f"loss file saved! {file_path}")
 
-        # No need to create tensors from scalar values
-        # You can use `val_loss` directly in scheduler
-        scheduler.step(val_loss)
+        train_loss = torch.tensor(train_loss).cuda(non_blocking=True)
+        val_loss = torch.tensor(val_loss).cuda(non_blocking=True)
+        num_subjects = torch.tensor(num_subjects).cuda(non_blocking=True)
+
+        val_loss = val_loss / num_subjects
 
         is_new_best = val_loss < best_val_loss
         best_val_loss = min(best_val_loss, val_loss)

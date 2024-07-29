@@ -13,11 +13,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from fastmri.data import transforms
-
-from unet import Unet
-from nafssr_copy import NAFNetSR
-from nafssr_copy import Normnafssr
 import torch.utils.checkpoint as checkpoint
+from nafssr_copy import Normnafssr
+from unet import Unet
+
 
 class NormUnet(nn.Module):
     """
@@ -69,11 +68,12 @@ class NormUnet(nn.Module):
         # group norm
         b, c, h, w = x.shape
         x = x.view(b, 2, c // 2 * h * w)
+
         mean = x.mean(dim=2).view(b, c, 1, 1)
         std = x.std(dim=2).view(b, c, 1, 1)
-        eps = 1e-8
-        std = std + eps
+
         x = x.view(b, c, h, w)
+
         return (x - mean) / std, mean, std
 
     def unnorm(
@@ -108,15 +108,16 @@ class NormUnet(nn.Module):
         return x[..., h_pad[0] : h_mult - h_pad[1], w_pad[0] : w_mult - w_pad[1]]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x.requires_grad_()
         if not x.shape[-1] == 2:
             raise ValueError("Last dimension must be 2 for complex.")
+
         # get shapes for unet and normalize
         x = self.complex_to_chan_dim(x)
         x, mean, std = self.norm(x)
         x, pad_sizes = self.pad(x)
-        x = self.unet(x)
-
+        
+        x = self.unet(x) # input, output C, complex, H, W
+        
         # get shapes back and unnormalize
         x = self.unpad(x, *pad_sizes)
         x = self.unnorm(x, mean, std)
@@ -175,7 +176,6 @@ class SensitivityModel(nn.Module):
         return x / fastmri.rss_complex(x, dim=1).unsqueeze(-1).unsqueeze(1)
 
     def forward(self, masked_kspace: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-        masked_kspace.requires_grad_()
         # get low frequency line locations and mask them out
         squeezed_mask = mask[:, 0, 0, :, 0]
         cent = squeezed_mask.shape[1] // 2
@@ -186,12 +186,15 @@ class SensitivityModel(nn.Module):
             2 * torch.min(left, right), torch.ones_like(left)
         )  # force a symmetric center unless 1
         pad = (mask.shape[-2] - num_low_freqs + 1) // 2
+
         x = transforms.batched_mask_center(masked_kspace, pad, pad + num_low_freqs)
+
         # convert to image space
         x = fastmri.ifft2c(x)
         x, b = self.chans_to_batch_dim(x)
+        
         # estimate sensitivities
-        x = self.norm_unet(x)
+        x = self.norm_unet(x) #input, output C, B, H, W, complex
         x = self.batch_chans_to_chan_dim(x, b)
         x = self.divide_root_sum_of_squares(x)
 
@@ -226,28 +229,39 @@ class VarNet(nn.Module):
                 U-Net.
         """
         super().__init__()
-        
+
         self.sens_net = SensitivityModel(sens_chans, sens_pools)
         self.cascades = nn.ModuleList(
-            # width: How many channels
-            # num_blks: How many Nafblocks to cascade
-            
-            [VarNetBlock(UNaFCascade(Normnafssr(up_scale=8, width=8, num_blks=8, img_channel=2, drop_path_rate=0.1, drop_out_rate=0., fusion_from=-1, fusion_to=-1, dual=False),NormUnet(chans, pools))) for _ in range(num_cascades)]
+            [VarNetBlock(NormUnet(chans, pools)) for _ in range(num_cascades)]
         )
+        self.normnafssr = Normnafssr(up_scale=1, width=8, num_blks=16, img_channel=1, drop_path_rate=0.1, drop_out_rate=0., fusion_from=-1, fusion_to=-1000, dual=True)
 
-    def forward(self, masked_kspace: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    def forward(self, masked_kspace: torch.Tensor, mask: torch.Tensor, grappa: torch.Tensor) -> torch.Tensor:
         sens_maps = self.sens_net(masked_kspace, mask)
         kspace_pred = masked_kspace.clone()
-
         for cascade in self.cascades:
-            #kspace_pred = cascade(kspace_pred, masked_kspace, mask, sens_maps)
+#             kspace_pred = cascade(kspace_pred, masked_kspace, mask, sens_maps)
             kspace_pred = checkpoint.checkpoint(cascade, kspace_pred, masked_kspace, mask, sens_maps)
             
         result = fastmri.rss(fastmri.complex_abs(fastmri.ifft2c(kspace_pred)), dim=1)
+    
         height = result.shape[-2]
         width = result.shape[-1]
-        return result[..., (height - 384) // 2 : 384 + (height - 384) // 2, (width - 384) // 2 : 384 + (width - 384) // 2]
-
+        
+        result = result[..., (height - 384) // 2 : 384 + (height - 384) // 2, (width - 384) // 2 : 384 + (width - 384) // 2]
+        
+        result = result.unsqueeze(1)
+        grappa = grappa.unsqueeze(1)
+        #print(result.shape)
+        #print(grappa.shape)
+        result = torch.cat((result, grappa), dim = 1)
+        #print(result.shape)
+        
+        result = self.normnafssr(result)
+        result = result.mean(dim=1)
+        
+        
+        return result
 
 class VarNetBlock(nn.Module):
     """
@@ -285,6 +299,9 @@ class VarNetBlock(nn.Module):
         mask: torch.Tensor,
         sens_maps: torch.Tensor,
     ) -> torch.Tensor:
+        current_kspace.requires_grad_()
+        ref_kspace.requires_grad_()
+        sens_maps.requires_grad_()
         zero = torch.zeros(1, 1, 1, 1, 1).to(current_kspace)
         soft_dc = torch.where(mask, current_kspace - ref_kspace, zero) * self.dc_weight
         model_term = self.sens_expand(
@@ -292,18 +309,3 @@ class VarNetBlock(nn.Module):
         )
 
         return current_kspace - soft_dc - model_term
-
-
-class UNaFCascade(nn.Module):
-    def __init__(self, nafssr:nn.Module, normunet: nn.Module):
-        super(UNaFCascade, self).__init__()
-        self.nafssr = nafssr
-        self.normunet = normunet
-    def forward(self, x):
-        x.requires_grad_()
-        x = self.normunet(x)
-        
-        #print(x.shape)
-        x = self.nafssr(x)
-        #print(x.shape)
-        return x

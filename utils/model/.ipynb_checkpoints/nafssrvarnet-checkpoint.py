@@ -229,9 +229,10 @@ class VarNet(nn.Module):
         
         self.sens_net = SensitivityModel(sens_chans, sens_pools)
         self.cascades = nn.ModuleList(
-            # up_scale=4, width=48, num_blks=16, img_channel=3, drop_path_rate=0., drop_out_rate=0., fusion_from=-1, fusion_to=-1, dual=False)
+            # width: How many channels
+            # num_blks: How many Nafblocks to cascade
             
-            [VarNetBlock(UNaFCascade(Normnafssr(up_scale=4, width=128, num_blks=128, img_channel=2, drop_path_rate=0.1, drop_out_rate=0., fusion_from=-1, fusion_to=-1, dual=False),NormUnet(chans, pools))) for _ in range(num_cascades)]
+            [VarNetBlock(UNaFCascade(Normnafssr(up_scale=8, width=8, num_blks=8, img_channel=2, drop_path_rate=0.1, drop_out_rate=0., fusion_from=-1, fusion_to=-1, dual=False),NormUnet(chans, pools))) for _ in range(num_cascades)]
         )
 
     def forward(self, masked_kspace: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:

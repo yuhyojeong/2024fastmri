@@ -167,13 +167,13 @@ class NAFNet(nn.Module):
         encs = []
 
         for encoder, down in zip(self.encoders, self.downs):
-#             x = encoder(x)
-            x = checkpoint.checkpoint(encoder, x)
+            x = encoder(x)
+#             x = checkpoint.checkpoint(encoder, x)
             encs.append(x)
             x = down(x)
 
-#         x = self.middle_blks(x)
-        x = checkpoint.checkpoint(self.middle_blks, x)
+        x = self.middle_blks(x)
+#         x = checkpoint.checkpoint(self.middle_blks, x)
 
         for decoder, up, enc_skip in zip(self.decoders, self.ups, encs[::-1]):
             x = up(x)

@@ -6,7 +6,8 @@ from utils.common.utils import save_reconstructions
 #from utils.data.load_data2 import create_data_loaders
 from utils.data.load_data import create_data_loaders
 #from utils.model.nafvarnet_copy import VarNet
-from utils.model.nafssrvarnet import VarNet
+# from utils.model.varnet_nafssr import VarNet
+from utils.model.varnet import VarNet
 
 
 def test(args, model, data_loader):
@@ -14,10 +15,11 @@ def test(args, model, data_loader):
     reconstructions = defaultdict(dict)
     
     with torch.no_grad():
-        for (mask, kspace, _, _, fnames, slices) in data_loader:
+        for (mask, kspace, grappa, _, _, fnames, slices) in data_loader:
             kspace = kspace.cuda(non_blocking=True)
             mask = mask.cuda(non_blocking=True)
-            output = model(kspace, mask)
+            grappa = grappa.cuda(non_blocking=True)
+            output = model(kspace, mask, grappa)
 
             for i in range(output.shape[0]):
                 reconstructions[fnames[i]][int(slices[i])] = output[i].cpu().numpy()
