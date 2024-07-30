@@ -4,4 +4,4 @@ python reconstruct.py \
   -p '/home/Data/leaderboard' \
   --cascade 11 \
   --chans 18 \
-  --sens_chans 8 
+  --sens_chans 8

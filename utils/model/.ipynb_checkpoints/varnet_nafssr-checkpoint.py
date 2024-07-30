@@ -239,6 +239,7 @@ class VarNet(nn.Module):
     def forward(self, masked_kspace: torch.Tensor, mask: torch.Tensor, grappa: torch.Tensor) -> torch.Tensor:
         sens_maps = self.sens_net(masked_kspace, mask)
         kspace_pred = masked_kspace.clone()
+        grappa.requires_grad_()
         for cascade in self.cascades:
 #             kspace_pred = cascade(kspace_pred, masked_kspace, mask, sens_maps)
             kspace_pred = checkpoint.checkpoint(cascade, kspace_pred, masked_kspace, mask, sens_maps)
@@ -251,10 +252,12 @@ class VarNet(nn.Module):
         result = result[..., (height - 384) // 2 : 384 + (height - 384) // 2, (width - 384) // 2 : 384 + (width - 384) // 2]
         
         result = result.unsqueeze(1)
-        grappa = grappa.unsqueeze(1)
+        #grappa = grappa.unsqueeze(1)
+        target = target.unsqueeze(1)
+        
         #print(result.shape)
-        #print(grappa.shape)
-        result = torch.cat((result, grappa), dim = 1)
+        #print(target.shape)
+        result = torch.cat((result, target), dim = 1)
         #print(result.shape)
         
         result = self.normnafssr(result)

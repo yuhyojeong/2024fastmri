@@ -7,41 +7,38 @@ import requests
 from tqdm import tqdm
 from pathlib import Path
 import copy
+import torch.optim as optim
 
 from collections import defaultdict
-#from utils.data.load_data2 import create_data_loaders
+import matplotlib.pyplot as plt
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from utils.data.load_data import create_data_loaders
 from utils.common.utils import save_reconstructions, ssim_loss
 from utils.common.loss_function import SSIMLoss
-#from utils.model.nafvarnet_copy import VarNet
-# from utils.model.nafssrvarnet import VarNet
-from utils.model.varnet import VarNet
+from utils.model.varnet_nafssr import VarNet
+# from utils.model.varnet import VarNet
 import os
-import torch.cuda.amp as amp
 
-def train_epoch(args, epoch, model, data_loader, optimizer, loss_type, scaler):
+def train_epoch(args, epoch, model, data_loader, optimizer, loss_type):
     model.train()
     start_epoch = start_iter = time.perf_counter()
     len_loader = len(data_loader)
     total_loss = 0.
 
     for iter, data in enumerate(data_loader):
-        mask, kspace, target, maximum, _, _ = data
+        mask, kspace, grappa, target, maximum, _, _ = data
         mask = mask.cuda(non_blocking=True)
         kspace = kspace.cuda(non_blocking=True)
         target = target.cuda(non_blocking=True)
         maximum = maximum.cuda(non_blocking=True)
+        grappa = grappa.cuda(non_blocking=True)
 
+        output = model(kspace, mask, grappa, target)
+        loss = loss_type(output, target, maximum)
         optimizer.zero_grad()
-        
-        with amp.autocast():
-            output = model(kspace, mask)
-            loss = loss_type(output, target, maximum)
+        loss.backward()
+        optimizer.step()
 
-        scaler.scale(loss).backward()
-        scaler.step(optimizer)
-        scaler.update()
-        
         total_loss += loss.item()
 
         if iter % args.report_interval == 0:
@@ -63,10 +60,12 @@ def validate(args, model, data_loader):
 
     with torch.no_grad():
         for iter, data in enumerate(data_loader):
-            mask, kspace, target, _, fnames, slices = data
+            mask, kspace, grappa, target, _, fnames, slices = data
             kspace = kspace.cuda(non_blocking=True)
             mask = mask.cuda(non_blocking=True)
-            output = model(kspace, mask)
+            grappa = grappa.cuda(non_blocking=True)
+            target = target.cuda(non_blocking=True)
+            output = model(kspace, mask, grappa, target)
 
             for i in range(output.shape[0]):
                 reconstructions[fnames[i]][int(slices[i])] = output[i].cpu().numpy()
@@ -103,7 +102,7 @@ def download_model(url, fname):
     response = requests.get(url, timeout=10, stream=True)
 
     chunk_size = 8 * 1024 * 1024  # 8 MB chunks
-    total_size_in_bytes = int(response.headers.get("content-length", 0))
+    total_size in bytes = int(response.headers.get("content-length", 0))
     progress_bar = tqdm(
         desc="Downloading state_dict",
         total=total_size_in_bytes,
@@ -116,6 +115,24 @@ def download_model(url, fname):
             progress_bar.update(len(chunk))
             fh.write(chunk)
 
+class EarlyStopping:
+    def __init__(self, patience, min_delta):
+        self.patience = patience
+        self.min_delta = min_delta
+        self.best_loss = None
+        self.counter = 0
+        self.early_stop = False
+
+    def __call__(self, valid_loss, best_loss):
+        if self.best_loss is None:
+            self.best_loss = valid_loss
+        elif valid_loss <= self.best_loss - self.min_delta:
+            self.best_loss = valid_loss
+        else:
+            self.counter += 1
+            if self.counter >= self.patience:
+                self.early_stop = True
+                
 def train(args):
     device = torch.device(f'cuda:{args.GPU_NUM}' if torch.cuda.is_available() else 'cpu')
     torch.cuda.set_device(device)
@@ -143,25 +160,30 @@ def train(args):
     """
 
     loss_type = SSIMLoss().to(device=device)
-    optimizer = torch.optim.Adam(model.parameters(), args.lr)
-    scaler = amp.GradScaler()
-
+    optimizer = torch.optim.AdamW(model.parameters(), args.lr)
+    scheduler = ReduceLROnPlateau(optimizer, 'min', factor=0.5, patience=2, verbose=True)
+    early_stopping = EarlyStopping(2, 0)
+    train_losses = []
+    valid_losses = []
+    
     best_val_loss = 1.
     start_epoch = 0
 
-    
-    train_loader = create_data_loaders(data_path = args.data_path_train, args = args, shuffle=True)
-    val_loader = create_data_loaders(data_path = args.data_path_val, args = args)
+    train_loader = create_data_loaders(data_path=args.data_path_train, args=args, shuffle=True)
+    val_loader = create_data_loaders(data_path=args.data_path_val, args=args)
     
     val_loss_log = np.empty((0, 2))
     for epoch in range(start_epoch, args.num_epochs):
         print(f'Epoch #{epoch:2d} ............... {args.net_name} ...............')
         
-        train_loss, train_time = train_epoch(args, epoch, model, train_loader, optimizer, loss_type, scaler)
+        train_loss, train_time = train_epoch(args, epoch, model, train_loader, optimizer, loss_type)
         val_loss, num_subjects, reconstructions, targets, inputs, val_time = validate(args, model, val_loader)
         
+        train_losses.append(train_loss)
+        valid_losses.append(val_loss)
+        
         val_loss_log = np.append(val_loss_log, np.array([[epoch, val_loss]]), axis=0)
-        file_path = os.path.join(args.val_loss_dir, "val_loss_log.npy")
+        file_path = os.path.join(args.val_loss_dir, "val_loss_log")
         np.save(file_path, val_loss_log)
         print(f"loss file saved! {file_path}")
 
@@ -187,3 +209,17 @@ def train(args):
             print(
                 f'ForwardTime = {time.perf_counter() - start:.4f}s',
             )
+
+        scheduler.step(val_loss)
+        early_stopping(val_loss, best_val_loss)
+        if early_stopping.early_stop:
+            print("Early stopping")
+            break
+            
+    plt.figure()
+    plt.plot(train_losses, label='Train Loss')
+    plt.plot(valid_losses, label='Valid Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.show()
