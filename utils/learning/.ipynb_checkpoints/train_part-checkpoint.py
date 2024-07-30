@@ -17,7 +17,6 @@ from utils.common.loss_function import SSIMLoss
 # from utils.model.varnet_nafssr import VarNet
 from utils.model.varnet import VarNet
 import os
-import torch.cuda.amp as amp
 
 def train_epoch(args, epoch, model, data_loader, optimizer, loss_type):
     model.train()

@@ -241,6 +241,7 @@ class VarNet(nn.Module):
     def forward(self, masked_kspace: torch.Tensor, mask: torch.Tensor, grappa: torch.Tensor) -> torch.Tensor:
         sens_maps = self.sens_net(masked_kspace, mask)
         kspace_pred = masked_kspace.clone()
+        grappa.requires_grad_()
         for cascade in self.cascades:
 #             kspace_pred = cascade(kspace_pred, masked_kspace, mask, sens_maps)
             kspace_pred = checkpoint.checkpoint(cascade, kspace_pred, masked_kspace, mask, sens_maps)
