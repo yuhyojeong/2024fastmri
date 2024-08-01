@@ -15,11 +15,12 @@ def test(args, model, data_loader):
     reconstructions = defaultdict(dict)
     
     with torch.no_grad():
-        for (mask, kspace, grappa, _, _, fnames, slices) in data_loader:
+        for (mask, kspace, grappa, _, _, _, fnames, slices) in data_loader:
             kspace = kspace.cuda(non_blocking=True)
             mask = mask.cuda(non_blocking=True)
             grappa = grappa.cuda(non_blocking=True)
-            output = model(kspace, mask, grappa)
+            
+            output = model(kspace, mask, grappa, kspace)
 
             for i in range(output.shape[0]):
                 reconstructions[fnames[i]][int(slices[i])] = output[i].cpu().numpy()

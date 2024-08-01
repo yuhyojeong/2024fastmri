@@ -44,14 +44,15 @@ def train_epoch(args, epoch, model, data_loader, optimizer, loss_type):
     total_loss = 0.
 
     for iter, data in enumerate(data_loader):
-        mask, kspace, grappa, target, maximum, _, _ = data
+        mask, kspace, grappa, full_kspace, target, maximum, _, _ = data
         mask = mask.cuda(non_blocking=True)
         kspace = kspace.cuda(non_blocking=True)
         target = target.cuda(non_blocking=True)
         maximum = maximum.cuda(non_blocking=True)
         grappa = grappa.cuda(non_blocking=True)
+        full_kspace = full_kspace.cuda(non_blocking=True)
 
-        output = model(kspace, mask, grappa)
+        output = model(kspace, mask, grappa, full_kspace)
         loss = loss_type(output, target, maximum)
         optimizer.zero_grad()
         loss.backward()
@@ -78,11 +79,13 @@ def validate(args, model, data_loader):
 
     with torch.no_grad():
         for iter, data in enumerate(data_loader):
-            mask, kspace, grappa, target, _, fnames, slices = data
+            mask, kspace, grappa, full_kspace, target, _, fnames, slices = data
             kspace = kspace.cuda(non_blocking=True)
             mask = mask.cuda(non_blocking=True)
             grappa = grappa.cuda(non_blocking=True)
-            output = model(kspace, mask, grappa)
+            full_kspace = full_kspace.cuda(non_blocking=True)
+            
+            output = model(kspace, mask, grappa, full_kspace)
 
             for i in range(output.shape[0]):
                 reconstructions[fnames[i]][int(slices[i])] = output[i].cpu().numpy()
@@ -179,7 +182,7 @@ def train(args):
         val_loss, num_subjects, reconstructions, targets, inputs, val_time = validate(args, model, val_loader)
         
         train_losses.append(train_loss)
-        valid_losses.append(val_loss)
+        valid_losses.append(val_loss / num_subjects)
         
         val_loss_log = np.append(val_loss_log, np.array([[epoch, val_loss]]), axis=0)
         file_path = os.path.join(args.val_loss_dir, "val_loss_log")
@@ -194,7 +197,7 @@ def train(args):
 
         is_new_best = val_loss < best_val_loss
         best_val_loss = min(best_val_loss, val_loss)
-
+        
         save_model(args, args.exp_dir, epoch + 1, model, optimizer, best_val_loss, is_new_best)
         print(
             f'Epoch = [{epoch:4d}/{args.num_epochs:4d}] TrainLoss = {train_loss:.4g} '

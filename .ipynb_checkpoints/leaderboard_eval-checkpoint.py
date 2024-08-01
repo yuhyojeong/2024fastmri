@@ -82,6 +82,10 @@ def forward(args):
                     maximum = hf.attrs['max']
                     
                 with h5py.File(y_fname, "r") as hf:
+                    
+                    #print(args.output_key)
+                    #print(i_slice)
+                    
                     recon = hf[args.output_key][i_slice]
                     recon = torch.from_numpy(recon).to(device=device)
                     
