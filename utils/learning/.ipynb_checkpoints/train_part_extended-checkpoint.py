@@ -8,16 +8,40 @@ from tqdm import tqdm
 from pathlib import Path
 import copy
 import torch.optim as optim
+import matplotlib.pyplot as plt
 
 from collections import defaultdict
-import matplotlib.pyplot as plt
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from utils.data.load_data import create_data_loaders
 from utils.common.utils import save_reconstructions, ssim_loss
 from utils.common.loss_function import SSIMLoss
 from utils.model.varnet_nafssr import VarNet
 # from utils.model.varnet import VarNet
+
+## data augmentation
+from mraugment.data_augment import DataAugmentor
+from mraugment.data_transforms import VarNetDataTransform
+from pl_modules.fastmri_data_module import FastMriDataModule
+
 import os
+
+class EarlyStopping:
+    def __init__(self, patience, min_delta):
+        self.patience = patience
+        self.min_delta = min_delta
+        self.best_loss = None
+        self.counter = 0
+        self.early_stop = False
+
+    def __call__(self, valid_loss, best_loss):
+        if self.best_loss is None:
+            self.best_loss = valid_loss
+        elif valid_loss <= self.best_loss - self.min_delta:
+            self.best_loss = valid_loss
+        else:
+            self.counter += 1
+            if self.counter >= self.patience:
+                self.early_stop = True
 
 def train_epoch(args, epoch, model, data_loader, optimizer, loss_type):
     model.train()
@@ -26,14 +50,15 @@ def train_epoch(args, epoch, model, data_loader, optimizer, loss_type):
     total_loss = 0.
 
     for iter, data in enumerate(data_loader):
-        mask, kspace, grappa, target, maximum, _, _ = data
+        mask, kspace, grappa, full_kspace, target, maximum, _, _ = data
         mask = mask.cuda(non_blocking=True)
         kspace = kspace.cuda(non_blocking=True)
         target = target.cuda(non_blocking=True)
         maximum = maximum.cuda(non_blocking=True)
         grappa = grappa.cuda(non_blocking=True)
+        full_kspace = full_kspace.cuda(non_blocking=True)
 
-        output = model(kspace, mask, grappa, target)
+        output = model(kspace, mask, grappa, full_kspace)
         loss = loss_type(output, target, maximum)
         optimizer.zero_grad()
         loss.backward()
@@ -60,12 +85,13 @@ def validate(args, model, data_loader):
 
     with torch.no_grad():
         for iter, data in enumerate(data_loader):
-            mask, kspace, grappa, target, _, fnames, slices = data
+            mask, kspace, grappa, full_kspace, target, _, fnames, slices = data
             kspace = kspace.cuda(non_blocking=True)
             mask = mask.cuda(non_blocking=True)
             grappa = grappa.cuda(non_blocking=True)
-            target = target.cuda(non_blocking=True)
-            output = model(kspace, mask, grappa, target)
+            full_kspace = full_kspace.cuda(non_blocking=True)
+            
+            output = model(kspace, mask, grappa, full_kspace)
 
             for i in range(output.shape[0]):
                 reconstructions[fnames[i]][int(slices[i])] = output[i].cpu().numpy()
@@ -102,7 +128,7 @@ def download_model(url, fname):
     response = requests.get(url, timeout=10, stream=True)
 
     chunk_size = 8 * 1024 * 1024  # 8 MB chunks
-    total_size in bytes = int(response.headers.get("content-length", 0))
+    total_size_in_bytes = int(response.headers.get("content-length", 0))
     progress_bar = tqdm(
         desc="Downloading state_dict",
         total=total_size_in_bytes,
@@ -114,24 +140,6 @@ def download_model(url, fname):
         for chunk in response.iter_content(chunk_size):
             progress_bar.update(len(chunk))
             fh.write(chunk)
-
-class EarlyStopping:
-    def __init__(self, patience, min_delta):
-        self.patience = patience
-        self.min_delta = min_delta
-        self.best_loss = None
-        self.counter = 0
-        self.early_stop = False
-
-    def __call__(self, valid_loss, best_loss):
-        if self.best_loss is None:
-            self.best_loss = valid_loss
-        elif valid_loss <= self.best_loss - self.min_delta:
-            self.best_loss = valid_loss
-        else:
-            self.counter += 1
-            if self.counter >= self.patience:
-                self.early_stop = True
                 
 def train(args):
     device = torch.device(f'cuda:{args.GPU_NUM}' if torch.cuda.is_available() else 'cpu')
@@ -161,7 +169,7 @@ def train(args):
 
     loss_type = SSIMLoss().to(device=device)
     optimizer = torch.optim.AdamW(model.parameters(), args.lr)
-    scheduler = ReduceLROnPlateau(optimizer, 'min', factor=0.5, patience=2, verbose=True)
+    scheduler = ReduceLROnPlateau(optimizer, 'min', factor=0.5, patience=1, verbose=True)
     early_stopping = EarlyStopping(2, 0)
     train_losses = []
     valid_losses = []
@@ -180,7 +188,7 @@ def train(args):
         val_loss, num_subjects, reconstructions, targets, inputs, val_time = validate(args, model, val_loader)
         
         train_losses.append(train_loss)
-        valid_losses.append(val_loss)
+        valid_losses.append(val_loss / num_subjects)
         
         val_loss_log = np.append(val_loss_log, np.array([[epoch, val_loss]]), axis=0)
         file_path = os.path.join(args.val_loss_dir, "val_loss_log")
@@ -195,7 +203,7 @@ def train(args):
 
         is_new_best = val_loss < best_val_loss
         best_val_loss = min(best_val_loss, val_loss)
-
+        
         save_model(args, args.exp_dir, epoch + 1, model, optimizer, best_val_loss, is_new_best)
         print(
             f'Epoch = [{epoch:4d}/{args.num_epochs:4d}] TrainLoss = {train_loss:.4g} '
@@ -222,4 +230,4 @@ def train(args):
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
     plt.legend()
-    plt.show()
+    plt.savefig('loss_graph.png')

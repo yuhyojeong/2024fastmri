@@ -53,7 +53,7 @@ class SliceData(Dataset):
         return num_slices
 
     def __len__(self):
-        return len(self.kspace_examples) // 70 + 2 
+        return len(self.kspace_examples)
 
     def __getitem__(self, i):
         if not self.forward:
