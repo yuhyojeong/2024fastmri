@@ -233,6 +233,7 @@ class NAFNetSR(nn.Module):
         else:
             inp = (inp, )
         feats = [self.intro(x) for x in inp]
+        
         feats = self.body(*feats)
         out = torch.cat([self.up(x) for x in feats], dim=1)
         out = out + inp_hr

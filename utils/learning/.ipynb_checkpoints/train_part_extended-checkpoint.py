@@ -12,16 +12,24 @@ import matplotlib.pyplot as plt
 
 from collections import defaultdict
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from utils.data.load_data import create_data_loaders
+from utils.data.load_data_aug import create_data_loaders
 from utils.common.utils import save_reconstructions, ssim_loss
 from utils.common.loss_function import SSIMLoss
-from utils.model.varnet_nafssr import VarNet
-# from utils.model.varnet import VarNet
+# from utils.model.varnet_nafssr import VarNet
+from utils.model.varnet import VarNet
 
-## data augmentation
-from mraugment.data_augment import DataAugmentor
-from mraugment.data_transforms import VarNetDataTransform
-from pl_modules.fastmri_data_module import FastMriDataModule
+"""
+Train a VarNet model on the fastMRI dataset with MRAugment data augmentation. 
+
+The steps to add MRAugment to any training code is simple:
+    1) Initialize a DataAugmentor with desired augmentation parameters and probabilities
+    2) Pass augmentor to DataTransform that is applied to the training data
+    3) You are all set!
+"""
+
+# MRAugment-specific imports
+from utils.data.mraugment import DataAugmentor
+from utils.data.transforms_mraugment import DataTransform
 
 import os
 
@@ -50,15 +58,14 @@ def train_epoch(args, epoch, model, data_loader, optimizer, loss_type):
     total_loss = 0.
 
     for iter, data in enumerate(data_loader):
-        mask, kspace, grappa, full_kspace, target, maximum, _, _ = data
+        mask, kspace, grappa, target, maximum, _, _ = data
         mask = mask.cuda(non_blocking=True)
         kspace = kspace.cuda(non_blocking=True)
         target = target.cuda(non_blocking=True)
         maximum = maximum.cuda(non_blocking=True)
         grappa = grappa.cuda(non_blocking=True)
-        full_kspace = full_kspace.cuda(non_blocking=True)
 
-        output = model(kspace, mask, grappa, full_kspace)
+        output = model(kspace, mask, grappa)
         loss = loss_type(output, target, maximum)
         optimizer.zero_grad()
         loss.backward()
@@ -85,13 +92,12 @@ def validate(args, model, data_loader):
 
     with torch.no_grad():
         for iter, data in enumerate(data_loader):
-            mask, kspace, grappa, full_kspace, target, _, fnames, slices = data
+            mask, kspace, grappa, target, _, fnames, slices = data
             kspace = kspace.cuda(non_blocking=True)
             mask = mask.cuda(non_blocking=True)
             grappa = grappa.cuda(non_blocking=True)
-            full_kspace = full_kspace.cuda(non_blocking=True)
             
-            output = model(kspace, mask, grappa, full_kspace)
+            output = model(kspace, mask, grappa)
 
             for i in range(output.shape[0]):
                 reconstructions[fnames[i]][int(slices[i])] = output[i].cpu().numpy()
@@ -177,13 +183,17 @@ def train(args):
     best_val_loss = 1.
     start_epoch = 0
 
-    train_loader = create_data_loaders(data_path=args.data_path_train, args=args, shuffle=True)
     val_loader = create_data_loaders(data_path=args.data_path_val, args=args)
     
     val_loss_log = np.empty((0, 2))
     for epoch in range(start_epoch, args.num_epochs):
         print(f'Epoch #{epoch:2d} ............... {args.net_name} ...............')
         
+        ##
+        augmentor = DataAugmentor(args, epoch+1)
+        ##
+        
+        train_loader = create_data_loaders(data_path=args.data_path_train, args=args, augmentor = augmentor, shuffle=True)
         train_loss, train_time = train_epoch(args, epoch, model, train_loader, optimizer, loss_type)
         val_loss, num_subjects, reconstructions, targets, inputs, val_time = validate(args, model, val_loader)
         

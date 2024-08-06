@@ -15,8 +15,9 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from utils.data.load_data import create_data_loaders
 from utils.common.utils import save_reconstructions, ssim_loss
 from utils.common.loss_function import SSIMLoss
-from utils.model.varnet_nafssr import VarNet
-# from utils.model.varnet import VarNet
+#from utils.model.varnet_nafssr import VarNet
+from utils.model.promptmr import VarNet
+#from utils.model.varnet import VarNet
 import os
 
 class EarlyStopping:
@@ -44,15 +45,16 @@ def train_epoch(args, epoch, model, data_loader, optimizer, loss_type):
     total_loss = 0.
 
     for iter, data in enumerate(data_loader):
-        mask, kspace, grappa, full_kspace, target, maximum, _, _ = data
+        mask, kspace, grappa, target, maximum, _, _ = data
         mask = mask.cuda(non_blocking=True)
         kspace = kspace.cuda(non_blocking=True)
         target = target.cuda(non_blocking=True)
         maximum = maximum.cuda(non_blocking=True)
         grappa = grappa.cuda(non_blocking=True)
-        full_kspace = full_kspace.cuda(non_blocking=True)
-
-        output = model(kspace, mask, grappa, full_kspace)
+        
+        #for varnet
+        output = model(kspace, mask, grappa)
+        
         loss = loss_type(output, target, maximum)
         optimizer.zero_grad()
         loss.backward()
@@ -79,13 +81,12 @@ def validate(args, model, data_loader):
 
     with torch.no_grad():
         for iter, data in enumerate(data_loader):
-            mask, kspace, grappa, full_kspace, target, _, fnames, slices = data
+            mask, kspace, grappa, target, _, fnames, slices = data
             kspace = kspace.cuda(non_blocking=True)
             mask = mask.cuda(non_blocking=True)
             grappa = grappa.cuda(non_blocking=True)
-            full_kspace = full_kspace.cuda(non_blocking=True)
-            
-            output = model(kspace, mask, grappa, full_kspace)
+
+            output = model(kspace, mask, grappa)
 
             for i in range(output.shape[0]):
                 reconstructions[fnames[i]][int(slices[i])] = output[i].cpu().numpy()
@@ -140,9 +141,39 @@ def train(args):
     torch.cuda.set_device(device)
     print('Current cuda device: ', torch.cuda.current_device())
 
-    model = VarNet(num_cascades=args.cascade, 
-                   chans=args.chans, 
-                   sens_chans=args.sens_chans)
+    #for promptmr
+    model = VarNet(num_cascades= 10,
+        num_adj_slices= 1, #5
+        n_feat0 = 20, #48
+        feature_dim=[4, 8, 12],
+        prompt_dim=[2, 4, 8],
+        sens_n_feat0=10,
+        sens_feature_dim= [4, 8, 12],
+        sens_prompt_dim= [4, 8, 12],
+        len_prompt= [4, 4, 4],
+        prompt_size=[16, 8, 4],
+        n_enc_cab= [2, 2, 3],
+        n_dec_cab= [2, 2, 3],
+        n_skip_cab= [1, 1, 1],
+        n_bottleneck_cab= 1,
+        no_use_ca= False,
+        sens_len_prompt= None,
+        sens_prompt_size= None,
+        sens_n_enc_cab= None,
+        sens_n_dec_cab = None,
+        sens_n_skip_cab = None,
+        sens_n_bottleneck_cab= None,
+        sens_no_use_ca= None,
+        mask_center=True,
+        use_checkpoint=True,
+        low_mem=False,)
+        
+    
+    
+    #model = VarNet(num_cascades=args.cascade, 
+    #               chans=args.chans, 
+    #               sens_chans=args.sens_chans)
+    
     model.to(device=device)
 
     """
@@ -164,7 +195,7 @@ def train(args):
     loss_type = SSIMLoss().to(device=device)
     optimizer = torch.optim.AdamW(model.parameters(), args.lr)
     scheduler = ReduceLROnPlateau(optimizer, 'min', factor=0.5, patience=1, verbose=True)
-    early_stopping = EarlyStopping(2, 0)
+    early_stopping = EarlyStopping(4, 0)
     train_losses = []
     valid_losses = []
     

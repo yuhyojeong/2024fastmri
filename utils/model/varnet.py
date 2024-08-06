@@ -15,9 +15,8 @@ import torch.nn.functional as F
 from fastmri.data import transforms
 import torch.utils.checkpoint as checkpoint
 from normnaf import Normnafnet
-from normnafssr import Normnafssr
 from unet import Unet
-
+from kbnet import Normkbnet
 
 class NormUnet(nn.Module):
     """
@@ -236,13 +235,14 @@ class VarNet(nn.Module):
             [VarNetBlock(NormUnet(chans, pools)) for _ in range(num_cascades)]
         )
         self.normnaf = Normnafnet(3, 3, 1, [1, 1, 1, 28], [1, 1, 1, 1])
-        self.normnafssr = Normnafssr(up_scale=4, width=16, num_blks=16, img_channel=2, drop_path_rate=0.1, drop_out_rate=0.1, fusion_from=-1, fusion_to=-1, dual=False)
+        self.kbnet = Normkbnet(inp_channels=3, out_channels=3, dim=24, num_blocks=[1, 1, 1, 1], num_refinement_blocks=1,
+                 heads=[1, 1, 1, 1], ffn_expansion_factor=1)
 
-    def forward(self, masked_kspace: torch.Tensor, mask: torch.Tensor, grappa: torch.Tensor, full_kspace: torch.Tensor) -> torch.Tensor:
+    def forward(self, masked_kspace: torch.Tensor, mask: torch.Tensor, grappa: torch.Tensor) -> torch.Tensor:
+        masked_kspace.requires_grad_()
+        grappa.requires_grad_()
         sens_maps = self.sens_net(masked_kspace, mask)
         kspace_pred = masked_kspace.clone()
-        grappa.requires_grad_()
-#         full_kspace.requires_grad()
         for cascade in self.cascades:
 #             kspace_pred = cascade(kspace_pred, masked_kspace, mask, sens_maps)
             kspace_pred = checkpoint.checkpoint(cascade, kspace_pred, masked_kspace, mask, sens_maps)
@@ -252,12 +252,13 @@ class VarNet(nn.Module):
         width = result.shape[-1]
         result = result[..., (height - 384) // 2 : 384 + (height - 384) // 2, (width - 384) // 2 : 384 + (width - 384) // 2]
         result = result.unsqueeze(1)
-        full_img = fastmri.rss(fastmri.complex_abs(fastmri.ifft2c(full_kspace)), dim=1)
-        full_img = full_img[..., (height - 384) // 2 : 384 + (height - 384) // 2, (width - 384) // 2 : 384 + (width - 384) // 2]
-        full_img = full_img.unsqueeze(1)
+#         masked_kspace = fastmri.rss(fastmri.complex_abs(fastmri.ifft2c(masked_kspace)), dim=1)
+#         masked_kspace = masked_kspace[..., (height - 384) // 2 : 384 + (height - 384) // 2, (width - 384) // 2 : 384 + (width - 384) // 2]
+#         masked_kspace = masked_kspace.unsqueeze(1)
         grappa = grappa.unsqueeze(1)
-        result = torch.cat((result, grappa, full_img), dim = 1)
+        result = torch.cat((result, grappa, result), dim = 1)
         result = self.normnaf(result)
+#         result = self.kbnet(result)
         result = result.mean(dim=1)
         return result
 

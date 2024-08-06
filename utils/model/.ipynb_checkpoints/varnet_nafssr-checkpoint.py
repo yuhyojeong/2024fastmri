@@ -234,7 +234,7 @@ class VarNet(nn.Module):
         self.cascades = nn.ModuleList(
             [VarNetBlock(NormUnet(chans, pools)) for _ in range(num_cascades)]
         )
-        self.normnafssr = Normnafssr(up_scale=1, width=8, num_blks=16, img_channel=1, drop_path_rate=0.1, drop_out_rate=0., fusion_from=-1, fusion_to=-1000, dual=True)
+        self.normnafssr = Normnafssr(up_scale=1, width=8, num_blks=16, img_channel=2, drop_path_rate=0.1, drop_out_rate=0., fusion_from=-1, fusion_to= -1, dual=False)
 
     def forward(self, masked_kspace: torch.Tensor, mask: torch.Tensor, grappa: torch.Tensor, full_kspace: torch.Tensor) -> torch.Tensor:
         sens_maps = self.sens_net(masked_kspace, mask)
@@ -244,15 +244,28 @@ class VarNet(nn.Module):
 #             kspace_pred = cascade(kspace_pred, masked_kspace, mask, sens_maps)
             kspace_pred = checkpoint.checkpoint(cascade, kspace_pred, masked_kspace, mask, sens_maps)
             
-        result = fastmri.rss(fastmri.complex_abs(fastmri.ifft2c(kspace_pred)), dim=1)
+
+         
+        #print(kspace_pred.shape)
+        result = fastmri.rss(fastmri.complex_abs(fastmri.ifft2c(kspace_pred)), dim=1)  
+        #print(result.shape)
     
         height = result.shape[-2]
         width = result.shape[-1]
         
-        result = result[..., (height - 384) // 2 : 384 + (height - 384) // 2, (width - 384) // 2 : 384 + (width - 384) // 2]
         
+        result = result[..., (height - 384) // 2 : 384 + (height - 384) // 2, (width - 384) // 2 : 384 + (width - 384) // 2]
+        #print(result.shape)
         result = result.unsqueeze(1)
-
+        grappa = grappa.unsqueeze(1)
+        #print(result.shape)
+        result = torch.cat((grappa, result), dim = 1)
+        #print(result.shape)
+        result = self.normnafssr(result) 
+        
+        #result = result.unsqueeze(1)
+        #grappa = grappa.unsqueeze(1)
+        '''
         full_img = fastmri.rss(fastmri.complex_abs(fastmri.ifft2c(full_kspace)), dim=1)
     
         h = full_img.shape[-2]
@@ -261,16 +274,13 @@ class VarNet(nn.Module):
         full_img = full_img[..., (h - 384) // 2 : 384 + (h - 384) // 2, (w - 384) // 2 : 384 + (w - 384) // 2]
         
         full_img = full_img.unsqueeze(1)
-        
-        
+        '''         
         #print(result.shape)
         #print(full_img.shape)
-   
-
-        result = torch.cat((result, full_img), dim = 1)
+        #result = torch.cat((grappa, result), dim = 1)
         #print(result.shape)
-        
-        result = self.normnafssr(result)
+        #result = checkpoint.checkpoint(self.normnafssr,result)
+        #result = self.normnafssr(result)
         result = result.mean(dim=1)
         
         

@@ -19,7 +19,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+import torch.utils.checkpoint as checkpoint
 
 
 # handle multiple input
@@ -198,7 +198,8 @@ class NAFBlockSR(nn.Module):
     def forward(self, *feats):
         feats = tuple([self.blk(x) for x in feats])
         if self.fusion:
-            feats = self.fusion(*feats)
+            feats = checkpoint.checkpoint(self.fusion, *feats)
+            #feats = self.fusion(*feats)
         return feats
 
 class NAFNetSR(nn.Module):
@@ -233,7 +234,8 @@ class NAFNetSR(nn.Module):
         else:
             inp = (inp, )
         feats = [self.intro(x) for x in inp]
-        feats = self.body(*feats)
+        feats = checkpoint.checkpoint(self.body, *feats)
+        #feats = self.body(*feats)
         out = torch.cat([self.up(x) for x in feats], dim=1)
         out = out + inp_hr
         return out
