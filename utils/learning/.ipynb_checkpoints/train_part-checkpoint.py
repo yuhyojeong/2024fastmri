@@ -13,11 +13,13 @@ import matplotlib.pyplot as plt
 from collections import defaultdict
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from utils.data.load_data import create_data_loaders
+#from utils.data.load_data_train import create_data_loaders
 from utils.common.utils import save_reconstructions, ssim_loss
 from utils.common.loss_function import SSIMLoss
 #from utils.model.varnet_nafssr import VarNet
-# from utils.model.promptmr import VarNet
-from utils.model.varnet import VarNet
+#from utils.model.promptmr import VarNet
+from utils.model.promptmr_nafnet import VarNet
+#from utils.model.varnet import VarNet
 import os
 
 class EarlyStopping:
@@ -142,37 +144,37 @@ def train(args):
     print('Current cuda device: ', torch.cuda.current_device())
 
     #for promptmr
-#     model = VarNet(num_cascades= 10,
-#         num_adj_slices= 1, #5
-#         n_feat0 = 20, #48
-#         feature_dim=[4, 8, 12],
-#         prompt_dim=[2, 4, 8],
-#         sens_n_feat0=10,
-#         sens_feature_dim= [4, 8, 12],
-#         sens_prompt_dim= [4, 8, 12],
-#         len_prompt= [4, 4, 4],
-#         prompt_size=[16, 8, 4],
-#         n_enc_cab= [2, 2, 3],
-#         n_dec_cab= [2, 2, 3],
-#         n_skip_cab= [1, 1, 1],
-#         n_bottleneck_cab= 1,
-#         no_use_ca= False,
-#         sens_len_prompt= None,
-#         sens_prompt_size= None,
-#         sens_n_enc_cab= None,
-#         sens_n_dec_cab = None,
-#         sens_n_skip_cab = None,
-#         sens_n_bottleneck_cab= None,
-#         sens_no_use_ca= None,
-#         mask_center=True,
-#         use_checkpoint=True,
-#         low_mem=False,)
+    model = VarNet(num_cascades= 10,
+        num_adj_slices= 1, #5
+        n_feat0 = 20, #48
+        feature_dim=[4, 8, 12],
+        prompt_dim=[2, 4, 8],
+        sens_n_feat0=10,
+        sens_feature_dim= [4, 8, 12],
+        sens_prompt_dim= [4, 8, 12],
+        len_prompt= [4, 4, 4],
+        prompt_size=[16, 8, 4],
+        n_enc_cab= [2, 2, 3],
+        n_dec_cab= [2, 2, 3],
+        n_skip_cab= [1, 1, 1],
+        n_bottleneck_cab= 1,
+        no_use_ca= False,
+        sens_len_prompt= None,
+        sens_prompt_size= None,
+        sens_n_enc_cab= None,
+        sens_n_dec_cab = None,
+        sens_n_skip_cab = None,
+        sens_n_bottleneck_cab= None,
+        sens_no_use_ca= None,
+        mask_center=True,
+        use_checkpoint=True,
+        low_mem=False,)
         
     
     
-    model = VarNet(num_cascades=args.cascade, 
-                  chans=args.chans, 
-                  sens_chans=args.sens_chans)
+#     model = VarNet(num_cascades=args.cascade, 
+#                   chans=args.chans, 
+#                   sens_chans=args.sens_chans)
     
     model.to(device=device)
 

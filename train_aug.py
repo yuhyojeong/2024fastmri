@@ -93,13 +93,13 @@ def parse():
     parser.add_argument(
             '--aug_weight_translation', 
             type=float, 
-            default=1.0, 
+            default=0.5, 
             help='Weight of translation probability. Augmentation probability will be multiplied by this constant'
         )
     parser.add_argument(
             '--aug_weight_rotation', 
             type=float, 
-            default=1.0, 
+            default=0.1, 
             help='Weight of arbitrary rotation probability. Augmentation probability will be multiplied by this constant'
         )  
     parser.add_argument(
@@ -117,7 +117,7 @@ def parse():
     parser.add_argument(
             '--aug_weight_rot90', 
             type=float, 
-            default=1.0, 
+            default=0.1, 
             help='Weight of probability of rotation by multiples of 90 degrees. Augmentation probability will be multiplied by this constant'
         )  
     parser.add_argument(
@@ -129,7 +129,7 @@ def parse():
     parser.add_argument(
             '--aug_weight_flipv',
             type=float,
-            default=1.0, 
+            default=0.5, 
             help='Weight of vertical flip probability. Augmentation probability will be multiplied by this constant'
         ) 
 
@@ -151,7 +151,7 @@ def parse():
     parser.add_argument(
             '--aug_max_rotation', 
             type=float, 
-            default=180., 
+            default=45., 
             help='Maximum rotation applied in either clockwise or counter-clockwise direction in degrees.'
         )
     parser.add_argument(

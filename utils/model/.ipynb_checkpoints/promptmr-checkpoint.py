@@ -169,7 +169,7 @@ class PromptUnet(nn.Module):
                  n_enc_cab = [2, 3, 3],
                  n_dec_cab = [2, 2, 3],
                  n_skip_cab = [1, 1, 1],
-                 n_bottleneck_cab = 3,
+                 n_bottleneck_cab = 1,
                  no_use_ca = False,
                  learnable_input_prompt=False,
                  kernel_size=3, 

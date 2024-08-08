@@ -73,7 +73,7 @@ class CAB(nn.Module):
         res += x
         return res
 
-##########################################################################
+# #########################################################################
 # ---------- Prompt Block -----------------------
 
 class PromptBlock(nn.Module):
@@ -646,7 +646,7 @@ class VarNet(nn.Module):
             [PromptMRBlock(NormPromptUnet(2*num_adj_slices, 2*num_adj_slices, n_feat0, feature_dim, prompt_dim, len_prompt, prompt_size, n_enc_cab, n_dec_cab, n_skip_cab, n_bottleneck_cab, no_use_ca), num_adj_slices) for _ in range(num_cascades)]
         )
         self.use_checkpoint = use_checkpoint
-        #self.normnaf = Normnafnet(3, 3, 1, [1, 1, 1, 28], [1, 1, 1, 1])
+        self.normnaf = Normnafnet(3, 3, 1, [1, 1, 1, 28], [1, 1, 1, 1])
 
     def forward(
         self,
@@ -686,9 +686,15 @@ class VarNet(nn.Module):
         
         result = result[..., (height - 384) // 2 : 384 + (height - 384) // 2, (width - 384) // 2 : 384 + (width - 384) // 2]
         
-#         result = result.unsqueeze(1)
-#         grappa = grappa.unsqueeze(1)
-#         result = torch.cat((result, grappa, result), dim = 1)
-#         result = self.normnaf(result)
-#         result = result.mean(dim=1)
+        #print(result.shape)
+        result = result.unsqueeze(1)
+        grappa = grappa.unsqueeze(1)
+        
+        result = torch.cat((result, grappa, result), dim = 1)
+        
+        #print(result.shape)
+        
+        result = self.normnaf(result)
+        result = result.mean(dim=1)
+        
         return result

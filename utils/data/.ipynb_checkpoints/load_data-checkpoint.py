@@ -1,6 +1,6 @@
 import h5py
 import random
-from utils.data.transforms_grappa import DataTransform
+from utils.data.transforms import DataTransform
 from torch.utils.data import Dataset, DataLoader
 from pathlib import Path
 import numpy as np
@@ -55,7 +55,7 @@ class SliceData(Dataset):
     def __len__(self):
 #         return 64
         return len(self.kspace_examples)
-
+    
     def __getitem__(self, i):
         if not self.forward:
             image_fname, _ = self.image_examples[i]
