@@ -7,8 +7,8 @@ from utils.common.utils import save_reconstructions
 from utils.data.load_data import create_data_loaders
 #from utils.model.nafvarnet_copy import VarNet
 #from utils.model.varnet_nafssr import VarNet
-# from utils.model.promptmr import VarNet
-from utils.model.varnet import VarNet
+from utils.model.promptmr import VarNet
+# from utils.model.varnet import VarNet
 
 
 def test(args, model, data_loader):
