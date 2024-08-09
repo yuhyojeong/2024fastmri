@@ -53,8 +53,8 @@ class SliceData(Dataset):
         return num_slices
 
     def __len__(self):
-        return 64
-#         return len(self.kspace_examples)
+#         return 64
+        return len(self.kspace_examples)
     
     def maskfunc(self, length, center_fraction=0.08):
         mask = np.zeros(length, dtype=np.float32)
