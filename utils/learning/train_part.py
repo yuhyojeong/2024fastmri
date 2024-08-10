@@ -12,8 +12,8 @@ import matplotlib.pyplot as plt
 
 from collections import defaultdict
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-# from utils.data.load_data import create_data_loaders
-from utils.data.load_data_train import create_data_loaders
+from utils.data.load_data import create_data_loaders
+# from utils.data.load_data_train import create_data_loaders
 from utils.common.utils import save_reconstructions, ssim_loss
 from utils.common.loss_function import SSIMLoss
 #from utils.model.varnet_nafssr import VarNet
@@ -23,22 +23,24 @@ from utils.model.promptmr import VarNet
 import os
 
 class EarlyStopping:
-    def __init__(self, patience, min_delta):
+    def __init__(self, patience=3, min_delta=0.0):
         self.patience = patience
         self.min_delta = min_delta
         self.best_loss = None
         self.counter = 0
         self.early_stop = False
 
-    def __call__(self, valid_loss, best_loss):
+    def __call__(self, valid_loss):
         if self.best_loss is None:
             self.best_loss = valid_loss
-        elif valid_loss <= self.best_loss - self.min_delta:
+        elif valid_loss < self.best_loss - self.min_delta:
             self.best_loss = valid_loss
+            self.counter = 0
         else:
             self.counter += 1
             if self.counter >= self.patience:
                 self.early_stop = True
+
 
 def train_epoch(args, epoch, model, data_loader, optimizer, loss_type):
     model.train()
@@ -196,7 +198,7 @@ def train(args):
 
     loss_type = SSIMLoss().to(device=device)
     optimizer = torch.optim.AdamW(model.parameters(), args.lr)
-    scheduler = ReduceLROnPlateau(optimizer, 'min', factor=0.5, patience=1, verbose=True)
+    scheduler = ReduceLROnPlateau(optimizer, 'min', factor=0.5, patience=2, verbose=True)
     early_stopping = EarlyStopping(3, 0)
     train_losses = []
     valid_losses = []
@@ -246,7 +248,7 @@ def train(args):
             )
 
         scheduler.step(val_loss)
-        early_stopping(val_loss, best_val_loss)
+        early_stopping(val_loss)
         if early_stopping.early_stop:
             print("Early stopping")
             break

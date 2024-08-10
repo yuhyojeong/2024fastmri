@@ -1,8 +1,7 @@
 python train.py \
   -b 1 \
-  -e 3 \
-  -l 0.0007 \
-  -r 10 \
+  -e 10 \
+  -l 0.0007
   -n 'test_Varnet' \
   -t '/home/Data/train/' \
   -v '/home/Data/val/' \

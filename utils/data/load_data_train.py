@@ -56,10 +56,9 @@ class SliceData(Dataset):
 #         return 64
         return len(self.kspace_examples)
     
-    def maskfunc(self, length, center_fraction=0.08):
+    def maskfunc(self, length, acceleration_factor, center_fraction=0.08):
         mask = np.zeros(length, dtype=np.float32)
-        weights = [i for i in range(2, 10)]
-        acceleration_factor = random.choices(range(2, 10), weights=weights, k=1)[0]
+        
         num_center_points = int(center_fraction * length)
         
         center_start = (length - num_center_points) // 2
@@ -80,10 +79,16 @@ class SliceData(Dataset):
             image_fname, _ = self.image_examples[i]
         kspace_fname, dataslice = self.kspace_examples[i]
         grappa_fname, dataslice = self.grappa_examples[i]
-
+        
+        weights = [i for i in range(2, 10)]
+        acceleration_factor = random.choices(range(2, 10), weights=weights, k=1)[0]
+        
         with h5py.File(kspace_fname, "r") as hf:
             input = hf[self.input_key][dataslice]
-            mask = self.maskfunc(length = input.shape[2])
+            if (acceleration_factor == 4 or acceleration_factor == 5 or acceleration_factor == 8):
+                mask = np.array(hf["mask"])
+            else:
+                mask = self.maskfunc(length = input.shape[2], acceleration_factor = acceleration_factor)
         with h5py.File(grappa_fname, "r") as hf:
             grappa = hf['image_grappa'][dataslice]
         if self.forward:
