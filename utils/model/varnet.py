@@ -257,8 +257,8 @@ class VarNet(nn.Module):
 #         masked_kspace = masked_kspace.unsqueeze(1)
         grappa = grappa.unsqueeze(1)
         result = torch.cat((result, grappa, result), dim = 1)
-        result = self.normnaf(result)
-#         result = self.kbnet(result)
+#         result = self.normnaf(result)
+        result = self.kbnet(result)
         result = result.mean(dim=1)
         return result
 

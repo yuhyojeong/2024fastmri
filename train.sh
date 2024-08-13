@@ -1,7 +1,7 @@
 python train.py \
   -b 1 \
-  -e 5 \
-  -l 0.001 \
+  -e 20 \
+  -l 0.0007 \
   -r 100 \
   -n 'test_Varnet' \
   -t '/home/Data/train/' \
@@ -9,4 +9,5 @@ python train.py \
   --cascade 11 \
   --chans 18 \
   --sens_chans 8 \
-  --seed 91
+  --seed 91 \
+  --start 4

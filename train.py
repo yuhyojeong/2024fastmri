@@ -32,6 +32,7 @@ def parse():
     parser.add_argument('--target-key', type=str, default='image_label', help='Name of target key')
     parser.add_argument('--max-key', type=str, default='max', help='Name of max key in attributes')
     parser.add_argument('--seed', type=int, default=430, help='Fix random seed')
+    parser.add_argument('--start', type=int, default=0, help='Start epoch of augmentation')
     
     args = parser.parse_args()
     return args

@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 
 class SliceData(Dataset):
-    def __init__(self, root, transform, input_key, target_key, forward=False):
+    def __init__(self, root, transform, input_key, target_key, current_epoch, start, max_epoch, forward=False):
         self.transform = transform
         self.input_key = input_key
         self.target_key = target_key
@@ -14,6 +14,7 @@ class SliceData(Dataset):
         self.image_examples = []
         self.kspace_examples = []
         self.grappa_examples = []
+        self.newmask = []
         
         image_files = list(Path(root / "image").iterdir())
         kspace_files = list(Path(root / "kspace").iterdir())
@@ -26,9 +27,15 @@ class SliceData(Dataset):
                     (fname, slice_ind) for slice_ind in range(num_slices)
                 ]
         
+        
         for fname in sorted(kspace_files):
+            if (current_epoch > start):
+                prob = (current_epoch-start)/(max_epoch-start) * 0.4
+                if (random.random() < prob):
+                    acc = random.choice([6, 7, 9])
+                    self.newmask += [(fname, acc)]
+                
             num_slices = self._get_metadata(fname)
-
             self.kspace_examples += [
                 (fname, slice_ind) for slice_ind in range(num_slices)
             ]
@@ -80,12 +87,14 @@ class SliceData(Dataset):
         kspace_fname, dataslice = self.kspace_examples[i]
         grappa_fname, dataslice = self.grappa_examples[i]
         
-        weights = [i for i in range(2, 10)]
-        acceleration_factor = random.choices(range(2, 10), weights=weights, k=1)[0]
-        
         with h5py.File(kspace_fname, "r") as hf:
             input = hf[self.input_key][dataslice]
-            if (acceleration_factor == 4 or acceleration_factor == 5 or acceleration_factor == 8):
+            acceleration_factor = None
+            for fname, acc in self.newmask:
+                if kspace_fname == fname:
+                    acceleration_factor = acc
+                    break
+            if (acceleration_factor is None):
                 mask = np.array(hf["mask"])
             else:
                 mask = self.maskfunc(length = input.shape[2], acceleration_factor = acceleration_factor)
@@ -102,7 +111,7 @@ class SliceData(Dataset):
         return self.transform(mask, input, grappa, target, attrs, kspace_fname.name, dataslice)
 
 
-def create_data_loaders(data_path, args, shuffle=False, isforward=False):
+def create_data_loaders(data_path, args, current_epoch = 0, shuffle=False, isforward=False):
     if isforward == False:
         max_key_ = args.max_key
         target_key_ = args.target_key
@@ -114,6 +123,9 @@ def create_data_loaders(data_path, args, shuffle=False, isforward=False):
         transform=DataTransform(isforward, max_key_),
         input_key=args.input_key,
         target_key=target_key_,
+        current_epoch = current_epoch,
+        start = args.start,
+        max_epoch = args.num_epochs,
         forward = isforward
     )
 

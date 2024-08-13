@@ -17,9 +17,9 @@ from utils.data.load_data_train import create_data_loaders
 from utils.common.utils import save_reconstructions, ssim_loss
 from utils.common.loss_function import SSIMLoss
 #from utils.model.varnet_nafssr import VarNet
-from utils.model.promptmr import VarNet
-# from utils.model.promptmr_nafnet import VarNet
-#from utils.model.varnet import VarNet
+# from utils.model.promptmr import VarNet
+from utils.model.promptmr_nafnet import VarNet
+# from utils.model.varnet import VarNet
 import os
 
 class EarlyStopping:
@@ -205,13 +205,14 @@ def train(args):
     
     best_val_loss = 1.
     start_epoch = 0
-
-    train_loader = create_data_loaders(data_path=args.data_path_train, args=args, shuffle=True)
+    
     val_loader = create_data_loaders(data_path=args.data_path_val, args=args)
     
     val_loss_log = np.empty((0, 2))
     for epoch in range(start_epoch, args.num_epochs):
         print(f'Epoch #{epoch:2d} ............... {args.net_name} ...............')
+        
+        train_loader = create_data_loaders(data_path=args.data_path_train, args=args, current_epoch = epoch, shuffle=True)
         
         train_loss, train_time = train_epoch(args, epoch, model, train_loader, optimizer, loss_type)
         val_loss, num_subjects, reconstructions, targets, inputs, val_time = validate(args, model, val_loader)

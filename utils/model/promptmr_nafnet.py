@@ -13,6 +13,7 @@ import torch.nn.functional as F
 from fastmri_promptmr.data import transforms
 import torch.utils.checkpoint as checkpoint
 from normnaf import Normnafnet
+from kbnet import Normkbnet
 
 from typing import (
     List,
@@ -647,6 +648,8 @@ class VarNet(nn.Module):
         )
         self.use_checkpoint = use_checkpoint
         self.normnaf = Normnafnet(3, 3, 1, [1, 1, 1, 28], [1, 1, 1, 1])
+        self.kbnet = Normkbnet(inp_channels=3, out_channels=3, dim=24, num_blocks=[1, 1, 1, 2], num_refinement_blocks=1,
+                 heads=[1, 2, 4, 8], ffn_expansion_factor=1)
 
     def forward(
         self,
@@ -695,6 +698,7 @@ class VarNet(nn.Module):
         #print(result.shape)
         
         result = self.normnaf(result)
+#         result = self.kbnet(result)
         result = result.mean(dim=1)
         
         return result
