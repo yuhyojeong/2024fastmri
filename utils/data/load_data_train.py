@@ -29,11 +29,16 @@ class SliceData(Dataset):
         
         
         for fname in sorted(kspace_files):
-            if (current_epoch > start):
-                prob = (current_epoch-start)/(max_epoch-start) * 0.4
-                if (random.random() < prob):
+            if (current_epoch >= 20):
+                if (random.random() < 0.5):
                     acc = random.choice([6, 7, 9])
                     self.newmask += [(fname, acc)]
+            else:
+                if (current_epoch > start):
+                    prob = (current_epoch-start)/(19-start) * 0.5
+                    if (random.random() < prob):
+                        acc = random.choice([6, 7, 9])
+                        self.newmask += [(fname, acc)]
                 
             num_slices = self._get_metadata(fname)
             self.kspace_examples += [

@@ -1,7 +1,7 @@
 python train.py \
   -b 1 \
   -e 20 \
-  -l 0.0007 \
+  -l 0.0005 \
   -r 100 \
   -n 'test_Varnet' \
   -t '/home/Data/train/' \
@@ -10,4 +10,4 @@ python train.py \
   --chans 18 \
   --sens_chans 8 \
   --seed 91 \
-  --start 4
+  --start 3 # start augmentation from (n+2)th epoch (b/c epoch starts from 0, no augmentation until '--start')

@@ -108,7 +108,7 @@ def validate(args, model, data_loader):
     num_subjects = len(reconstructions)
     return metric_loss, num_subjects, reconstructions, targets, None, time.perf_counter() - start
 
-def save_model(args, exp_dir, epoch, model, optimizer, best_val_loss, is_new_best):
+def save_model(args, exp_dir, epoch, model, optimizer, scheduler, best_val_loss, is_new_best):
     torch.save(
         {
             'epoch': epoch,
@@ -116,12 +116,24 @@ def save_model(args, exp_dir, epoch, model, optimizer, best_val_loss, is_new_bes
             'model': model.state_dict(),
             'optimizer': optimizer.state_dict(),
             'best_val_loss': best_val_loss,
-            'exp_dir': exp_dir
+            'exp_dir': exp_dir,
+            'scheduler': scheduler.state_dict()
         },
         f=exp_dir / 'model.pt'
     )
     if is_new_best:
         shutil.copyfile(exp_dir / 'model.pt', exp_dir / 'best_model.pt')
+
+def load_model_checkpoint(exp_dir, model, optimizer, scheduler):
+    checkpoint = torch.load(exp_dir / 'model.pt')
+    model.load_state_dict(checkpoint['model'])
+    optimizer.load_state_dict(checkpoint['optimizer'])
+    scheduler.load_state_dict(checkpoint['scheduler'])
+    epoch = checkpoint['epoch']
+    best_val_loss = checkpoint['best_val_loss']
+    args = checkpoint['args']
+    
+    return epoch, best_val_loss, args
 
 def download_model(url, fname):
     response = requests.get(url, timeout=10, stream=True)
@@ -199,16 +211,28 @@ def train(args):
     loss_type = SSIMLoss().to(device=device)
     optimizer = torch.optim.AdamW(model.parameters(), args.lr)
     scheduler = ReduceLROnPlateau(optimizer, 'min', factor=0.5, patience=2, verbose=True)
-    early_stopping = EarlyStopping(3, 0)
+    early_stopping = EarlyStopping(5, 0)
     train_losses = []
     valid_losses = []
     
     best_val_loss = 1.
     start_epoch = 0
     
+    ## should 
+    ### load checkpoint
+    if (args.exp_dir / 'model.pt').exists():
+        print("Resuming training from last checkpoint...")
+        start_epoch, best_val_loss, args = load_model_checkpoint(args.exp_dir, model, optimizer, scheduler)
+        
     val_loader = create_data_loaders(data_path=args.data_path_val, args=args)
     
-    val_loss_log = np.empty((0, 2))
+    ### load valid loss log
+    val_loss_log_path = os.path.join(args.val_loss_dir, "val_loss_log.npy")
+    if os.path.exists(val_loss_log_path):
+        val_loss_log = np.load(val_loss_log_path)
+    else:
+        val_loss_log = np.empty((0, 2))
+        
     for epoch in range(start_epoch, args.num_epochs):
         print(f'Epoch #{epoch:2d} ............... {args.net_name} ...............')
         
@@ -234,7 +258,7 @@ def train(args):
         is_new_best = val_loss < best_val_loss
         best_val_loss = min(best_val_loss, val_loss)
         
-        save_model(args, args.exp_dir, epoch + 1, model, optimizer, best_val_loss, is_new_best)
+        save_model(args, args.exp_dir, epoch + 1, model, optimizer, scheduler, best_val_loss, is_new_best)
         print(
             f'Epoch = [{epoch:4d}/{args.num_epochs:4d}] TrainLoss = {train_loss:.4g} '
             f'ValLoss = {val_loss:.4g} TrainTime = {train_time:.4f}s ValTime = {val_time:.4f}s',
