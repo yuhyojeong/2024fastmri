@@ -156,6 +156,7 @@ def train(args):
     device = torch.device(f'cuda:{args.GPU_NUM}' if torch.cuda.is_available() else 'cpu')
     torch.cuda.set_device(device)
     print('Current cuda device: ', torch.cuda.current_device())
+    tmp = args.num_epochs
 
     #for promptmr
     model = VarNet(num_cascades= 10,
@@ -223,6 +224,7 @@ def train(args):
     if (args.exp_dir / 'model.pt').exists():
         print("Resuming training from last checkpoint...")
         start_epoch, best_val_loss, args = load_model_checkpoint(args.exp_dir, model, optimizer, scheduler)
+        args.num_epochs = tmp
         
     val_loader = create_data_loaders(data_path=args.data_path_val, args=args)
     
